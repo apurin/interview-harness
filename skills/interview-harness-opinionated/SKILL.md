@@ -1,5 +1,5 @@
 ---
-name: interview-harness-opionated
+name: interview-harness-opinionated
 description: Create a local HTML interview artifact with Interview Harness, using opinionated question patterns for agent-led design, assumption review, scope control, artifact redlining, and concise text-first export.
 ---
 
