@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interview Harness Example</title>
+</head>
+<body>
+  <div id="interview-harness"></div>
+
+  <script src="interview-harness.js"></script>
+  <script>
+    const h = InterviewHarness;
+
+    h.mount({
+      title: "Interview Harness direction check",
+      intro: "A compact example using rich items, review loops, and text-first export.",
+      questions: [
+        h.one("export_shape", "Which export shape should the first version optimize for?", [
+          h.item("summary", "Human-readable summary",
+            h.prosCons(
+              ["Fast for agents to consume", "Easy for users to inspect"],
+              ["Less precise for automation"]
+            )),
+          h.item("json", "Structured JSON",
+            h.prosCons(
+              ["Machine-readable", "Easy to validate"],
+              ["More API design pressure", "Higher authoring cost"]
+            ))
+        ]),
+
+        h.one("question_layout", "Pick the clearest layout for rich choices.", [
+          h.item("cards", "Card gallery", h.html(`
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;min-height:150px">
+              <div style="background:white;border:1px solid #d8ddd6;border-radius:8px"></div>
+              <div style="background:white;border:1px solid #2457ff;border-radius:8px"></div>
+              <div style="background:white;border:1px solid #d8ddd6;border-radius:8px"></div>
+            </div>
+          `)),
+          h.item("split", "Preview plus notes", h.html(`
+            <div style="display:grid;grid-template-columns:1.3fr .7fr;gap:8px;min-height:150px">
+              <div style="background:white;border:1px solid #d8ddd6;border-radius:8px"></div>
+              <div style="background:#eef3f0;border:1px solid #d8ddd6;border-radius:8px"></div>
+            </div>
+          `)),
+          h.item("frame", "Existing artifact frame", h.frame("question-type-examples.html", { height: "360px" }))
+        ]),
+
+        h.review("assumptions", "Check my working assumptions.",
+          ["true", "revise", "false", "unsure"],
+          [
+            "Users want to answer quickly, then export a concise summary.",
+            "Generated pages are temporary, local-first, and easy to inspect.",
+            "Programmatic JSON output should exist, but text should be the default handoff."
+          ]
+        ),
+
+        h.sort("scope", "Sort these into the right scope bucket.",
+          ["must", "maybe", "later", "no"],
+          [
+            "Iframe design previews",
+            "Line comments on generated artifacts",
+            "Conditional branching between questions",
+            "Opinionated skill examples"
+          ]
+        ),
+
+        h.rank("build_order", "What should come first?", [
+          "Readable library source",
+          "Neutral skill manual",
+          "Opinionated examples",
+          "Richer preview question types"
+        ]),
+
+        h.allocate("values", "Allocate 10 priority points.", 10, [
+          "Authoring speed",
+          "Expressive review",
+          "Small API",
+          "Export quality"
+        ]),
+
+        h.redline("draft_prompt", "Edit the prompt until it matches your intent.",
+          h.code("md", `Create a local HTML interview.
+Ask the user to pick a design direction and comment on non-selected options.
+Export a concise human-readable answer summary, with JSON available as a secondary format.`)
+        ),
+
+        h.many("missing_types", "Which question examples belong in the first manual?", [
+          "Design selector",
+          "Assumption review",
+          "Constraint classifier",
+          "Artifact redline",
+          "Terminology review"
+        ]),
+
+        h.text("extra_context", "What should the agent remember before making the next draft?", {
+          placeholder: "Add constraints, dislikes, or anything the choices missed."
+        })
+      ]
+    });
+  </script>
+</body>
+</html>
