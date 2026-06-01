@@ -8,6 +8,21 @@
   const VERSION = "0.1.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
+  const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
+  const CODEMIRROR_URL = "https://esm.sh/codemirror@6.0.2";
+  const CODEMIRROR_THEME_URL = "https://esm.sh/@codemirror/theme-one-dark@6.1.3";
+  const CODEMIRROR_LANGS = {
+    js: "https://esm.sh/@codemirror/lang-javascript@6.2.5",
+    javascript: "https://esm.sh/@codemirror/lang-javascript@6.2.5",
+    md: "https://esm.sh/@codemirror/lang-markdown@6.5.0",
+    markdown: "https://esm.sh/@codemirror/lang-markdown@6.5.0",
+    html: "https://esm.sh/@codemirror/lang-html@6.4.11",
+    json: "https://esm.sh/@codemirror/lang-json@6.0.2"
+  };
+  let sortablePromise = null;
+  let codeMirrorPromise = null;
+  let codeMirrorThemePromise = null;
+  const codeMirrorLanguagePromises = {};
 
   // Authoring helpers --------------------------------------------------------
 
@@ -24,15 +39,11 @@
   }
 
   function many(id, prompt, items, options) {
-    return question("many", id, prompt, Object.assign({ items }, options || {}));
+    return question("many", id, prompt, Object.assign({ items, allowAdd: true }, options || {}));
   }
 
   function rank(id, prompt, items, options) {
     return question("rank", id, prompt, Object.assign({ items }, options || {}));
-  }
-
-  function allocate(id, prompt, total, items, options) {
-    return question("allocate", id, prompt, Object.assign({ total, items }, options || {}));
   }
 
   function sort(id, prompt, buckets, items, options) {
@@ -40,7 +51,7 @@
   }
 
   function review(id, prompt, verbs, items, options) {
-    return question("review", id, prompt, Object.assign({ verbs, items }, options || {}));
+    return question("review", id, prompt, Object.assign({ verbs, items, allowAdd: true }, options || {}));
   }
 
   function redline(id, prompt, artifact, options) {
@@ -77,6 +88,7 @@
     config.intro = String(config.intro || "");
     config.questions = asArray(config.questions || config.steps || config.items).map(normalizeQuestion);
     config.storageKey = config.storageKey === false ? false : String(config.storageKey || defaultStorageKey(config.title));
+    config.pageMode = ["auto", "paged", "all"].includes(config.pageMode) ? config.pageMode : "auto";
     config.copyTextLabel = config.copyTextLabel || "Copy text";
     config.copyJsonLabel = config.copyJsonLabel || "Copy JSON";
     return config;
@@ -137,13 +149,6 @@
       });
     }
 
-    if (type === "allocate") {
-      return Object.assign(base, {
-        total: numberOr(raw.total, 10),
-        items: normalizeItems(raw.items || raw.options || raw.choices)
-      });
-    }
-
     return Object.assign(base, {
       items: normalizeItems(raw.items || raw.options || raw.choices),
       allowAdd: type === "many" ? raw.allowAdd !== false : Boolean(raw.allowAdd)
@@ -152,7 +157,6 @@
 
   function inferQuestionType(raw) {
     if (raw.artifact || raw.content) return "redline";
-    if (raw.total !== undefined) return "allocate";
     if (raw.buckets) return "sort";
     if (raw.verbs) return "review";
     if (raw.items || raw.options || raw.choices) return raw.multiple ? "many" : "one";
@@ -202,42 +206,99 @@
     questions.forEach((questionDef) => {
       answers[questionDef.id] = initialAnswer(questionDef);
     });
-    return { step: 0, answers };
+    return { version: VERSION, step: 0, viewMode: "paged", commentEditor: null, answers };
   }
 
   function initialAnswer(questionDef) {
     if (questionDef.type === "text") return { answer: questionDef.defaultValue || "" };
     if (questionDef.type === "one") return { selected: "", comments: {} };
     if (questionDef.type === "many") return { selected: [], comments: {}, added: [] };
-    if (questionDef.type === "rank") return { order: questionDef.items.map((entry) => entry.id), comments: {}, comment: "" };
-    if (questionDef.type === "allocate") return { points: objectFrom(questionDef.items, 0), comments: {} };
-    if (questionDef.type === "sort") return { buckets: objectFrom(questionDef.items, ""), comments: {}, comment: "" };
-    if (questionDef.type === "review") return { verdicts: objectFrom(questionDef.items, ""), edits: objectFrom(questionDef.items, "title"), comments: {}, added: [] };
-    if (questionDef.type === "redline") return { content: artifactText(questionDef.artifact), comments: {}, summary: "" };
+    if (questionDef.type === "rank") return { order: questionDef.items.map((entry) => entry.id), comments: {}, touched: false };
+    if (questionDef.type === "sort") return { buckets: objectFrom(questionDef.items, ""), comments: {} };
+    if (questionDef.type === "review") return { verdicts: objectFrom(questionDef.items, defaultReviewVerdict(questionDef)), edits: objectFrom(questionDef.items, "title"), comments: {}, added: [] };
+    if (questionDef.type === "redline") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
     return { answer: "" };
   }
 
   function mergeState(saved, current, questions) {
     if (!saved || typeof saved !== "object") return current;
-    const next = Object.assign({}, current, { answers: Object.assign({}, current.answers) });
+    const next = Object.assign({}, current, {
+      version: VERSION,
+      viewMode: saved.viewMode === "all" || saved.viewMode === "paged" ? saved.viewMode : current.viewMode,
+      commentEditor: null,
+      answers: Object.assign({}, current.answers)
+    });
     if (Number.isInteger(saved.step)) next.step = Math.max(0, Math.min(saved.step, questions.length));
     questions.forEach((questionDef) => {
       if (saved.answers && saved.answers[questionDef.id]) {
-        next.answers[questionDef.id] = Object.assign({}, next.answers[questionDef.id], saved.answers[questionDef.id]);
+        next.answers[questionDef.id] = hydrateAnswer(questionDef, next.answers[questionDef.id], saved.answers[questionDef.id]);
       }
     });
     return next;
   }
 
+  function hydrateAnswer(questionDef, initial, saved) {
+    const answer = Object.assign({}, initial, saved || {});
+    if (initial.comments) answer.comments = Object.assign({}, initial.comments, safeObject(saved.comments));
+
+    if (questionDef.type === "many") {
+      answer.selected = asArray(saved.selected);
+      answer.added = normalizeAddedItems(saved.added);
+      answer.touched = Boolean(answer.selected.length || answer.added.length || Object.keys(answer.comments || {}).length);
+    }
+
+    if (questionDef.type === "rank") {
+      const known = new Set(questionDef.items.map((entry) => entry.id));
+      answer.order = asArray(saved.order).filter((id) => known.has(id));
+      questionDef.items.forEach((entry) => { if (!answer.order.includes(entry.id)) answer.order.push(entry.id); });
+      answer.touched = Boolean(saved.touched || Object.keys(answer.comments || {}).length || asArray(saved.order).join("|") !== questionDef.items.map((entry) => entry.id).join("|"));
+    }
+
+    if (questionDef.type === "sort") {
+      answer.buckets = Object.assign({}, initial.buckets, safeObject(saved.buckets));
+      answer.touched = Boolean(Object.values(answer.buckets).some(Boolean) || Object.keys(answer.comments || {}).length);
+    }
+
+    if (questionDef.type === "review") {
+      answer.verdicts = Object.assign({}, initial.verdicts, safeObject(saved.verdicts));
+      answer.edits = Object.assign({}, initial.edits, safeObject(saved.edits));
+      answer.added = normalizeAddedItems(saved.added);
+      const defaultVerdict = defaultReviewVerdict(questionDef);
+      questionDef.items.forEach((entry) => {
+        if (!answer.verdicts[entry.id]) answer.verdicts[entry.id] = defaultVerdict;
+      });
+      answer.added.forEach((entry) => {
+        if (answer.edits[entry.id] === undefined) answer.edits[entry.id] = entry.title;
+      });
+      answer.touched = Boolean(
+        answer.added.length ||
+        Object.values(answer.verdicts).some(Boolean) ||
+        Object.keys(answer.comments || {}).length ||
+        questionDef.items.some((entry) => answer.edits[entry.id] && answer.edits[entry.id] !== entry.title)
+      );
+    }
+
+    if (questionDef.type === "redline") {
+      answer.summary = String(saved.summary || "");
+      answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
+    }
+
+    return answer;
+  }
+
   function buildResult(config, state) {
+    const answers = config.questions
+      .map((questionDef, index) => serializeAnswer(questionDef, state.answers[questionDef.id], index))
+      .filter(Boolean);
     return {
       title: config.title,
       generatedAt: new Date().toISOString(),
-      answers: config.questions.map((questionDef, index) => serializeAnswer(questionDef, state.answers[questionDef.id], index))
+      answers
     };
   }
 
   function serializeAnswer(questionDef, answer, index) {
+    if (!answer || !isAnswerChanged(questionDef, answer)) return null;
     const base = {
       id: questionDef.id,
       type: questionDef.type,
@@ -248,37 +309,45 @@
     if (questionDef.type === "text") return Object.assign(base, { answer: answer.answer || "" });
 
     if (questionDef.type === "one") {
-      return Object.assign(base, {
-        selected: findItem(questionDef, answer.selected),
-        comments: itemComments(questionDef, answer.comments)
-      });
+      const comments = itemComments(answerItems(questionDef, answer), answer.comments);
+      const payload = {};
+      if (answer.selected) payload.selected = findItem(questionDef, answer, answer.selected);
+      if (comments.length) payload.comments = comments;
+      return Object.assign(base, payload);
     }
 
     if (questionDef.type === "many") {
-      return Object.assign(base, {
-        selected: asArray(answer.selected).map((id) => findItem(questionDef, id)).filter(Boolean),
-        added: asArray(answer.added),
-        comments: itemComments(questionDef, answer.comments)
-      });
+      const items = answerItems(questionDef, answer);
+      const selected = asArray(answer.selected).map((id) => findItem(questionDef, answer, id)).filter(Boolean);
+      const added = asArray(answer.added)
+        .filter((entry) => entry.title || asArray(answer.selected).includes(entry.id) || answer.comments && answer.comments[entry.id])
+        .map((entry) => {
+          const payload = {
+            id: entry.id,
+            title: entry.title,
+            selected: asArray(answer.selected).includes(entry.id)
+          };
+          const comment = answer.comments && answer.comments[entry.id] || "";
+          if (comment) payload.comment = comment;
+          return payload;
+        });
+      const comments = itemComments(items, answer.comments);
+      const payload = {};
+      if (selected.length) payload.selected = selected;
+      if (added.length) payload.added = added;
+      if (comments.length) payload.comments = comments;
+      return Object.assign(base, payload);
     }
 
     if (questionDef.type === "rank") {
-      return Object.assign(base, {
-        order: asArray(answer.order).map((id) => findItem(questionDef, id)).filter(Boolean),
-        comments: itemComments(questionDef, answer.comments),
-        overallComment: answer.comment || ""
-      });
-    }
-
-    if (questionDef.type === "allocate") {
-      const allocations = questionDef.items.map((entry) => ({
-        id: entry.id,
-        title: entry.title,
-        points: numberOr(answer.points && answer.points[entry.id], 0),
-        comment: (answer.comments && answer.comments[entry.id]) || ""
-      }));
-      const used = allocations.reduce((sum, entry) => sum + entry.points, 0);
-      return Object.assign(base, { total: questionDef.total, used, remaining: questionDef.total - used, allocations });
+      const defaultOrder = questionDef.items.map((entry) => entry.id);
+      const order = asArray(answer.order);
+      const orderChanged = order.join("|") !== defaultOrder.join("|");
+      const comments = itemComments(answerItems(questionDef, answer), answer.comments);
+      const payload = {};
+      if (orderChanged) payload.order = order.map((id) => findItem(questionDef, answer, id)).filter(Boolean);
+      if (comments.length) payload.comments = comments;
+      return Object.assign(base, payload);
     }
 
     if (questionDef.type === "sort") {
@@ -287,37 +356,45 @@
       const unset = [];
       questionDef.items.forEach((entry) => {
         const bucket = questionDef.buckets.find((candidate) => candidate.id === answer.buckets[entry.id]);
-        const payload = { id: entry.id, title: entry.title, comment: (answer.comments && answer.comments[entry.id]) || "" };
+        const comment = (answer.comments && answer.comments[entry.id]) || "";
+        const payload = { id: entry.id, title: entry.title };
+        if (comment) payload.comment = comment;
         if (bucket) buckets[bucket.title].push(payload);
-        else unset.push(payload);
+        else if (comment) unset.push(payload);
       });
-      return Object.assign(base, { buckets, unset, overallComment: answer.comment || "" });
+      Object.keys(buckets).forEach((bucket) => {
+        if (!buckets[bucket].length) delete buckets[bucket];
+      });
+      const payload = {};
+      if (Object.keys(buckets).length) payload.buckets = buckets;
+      if (unset.length) payload.unset = unset;
+      return Object.assign(base, payload);
     }
 
     if (questionDef.type === "review") {
+      const items = answerItems(questionDef, answer);
+      const defaultVerdict = defaultReviewVerdict(questionDef);
       return Object.assign(base, {
-        items: questionDef.items.map((entry) => ({
-          id: entry.id,
-          original: entry.title,
-          verdict: (answer.verdicts && answer.verdicts[entry.id]) || "",
-          edited: (answer.edits && answer.edits[entry.id]) || entry.title,
-          comment: (answer.comments && answer.comments[entry.id]) || ""
-        })),
-        added: asArray(answer.added)
+        items: items.map((entry) => {
+          const verdict = (answer.verdicts && answer.verdicts[entry.id]) || "";
+          const edited = (answer.edits && answer.edits[entry.id]) || entry.title;
+          const comment = (answer.comments && answer.comments[entry.id]) || "";
+          const verdictChanged = verdict && verdict !== defaultVerdict;
+          if (!entry.custom && !verdictChanged && !comment && edited === entry.title) return null;
+          const payload = { id: entry.id, title: entry.title };
+          if (entry.custom) payload.added = edited;
+          if (verdictChanged) payload.verdict = verdict;
+          if (!entry.custom && edited !== entry.title) payload.edited = edited;
+          if (comment) payload.comment = comment;
+          return payload;
+        }).filter(Boolean)
       });
     }
 
     if (questionDef.type === "redline") {
-      const lines = String(answer.content || "").split("\n");
-      return Object.assign(base, {
-        content: answer.content || "",
-        lineComments: lines.map((line, lineIndex) => ({
-          line: lineIndex + 1,
-          text: line,
-          comment: answer.comments && answer.comments[lineIndex + 1] || ""
-        })).filter((entry) => entry.text.trim() || entry.comment.trim()),
-        summary: answer.summary || ""
-      });
+      const output = { summary: answer.summary || "" };
+      if (String(answer.content || "") !== artifactText(questionDef.artifact)) output.content = answer.content || "";
+      return Object.assign(base, output);
     }
 
     return Object.assign(base, { answer });
@@ -326,6 +403,10 @@
   function buildTextExport(config, state) {
     const result = buildResult(config, state);
     const lines = [`# ${result.title}`, ""];
+    if (!result.answers.length) {
+      lines.push("No user changes yet.");
+      return lines.join("\n").trim() + "\n";
+    }
 
     result.answers.forEach((entry) => {
       lines.push(`## ${entry.position}. ${entry.question}`);
@@ -335,41 +416,36 @@
       }
 
       if (entry.type === "one") {
-        lines.push(entry.selected ? `Selected: ${entry.selected.title}` : "Selected: none");
-        appendComments(lines, entry.comments);
+        if (entry.selected) lines.push(`Selected: ${entry.selected.title}`);
+        appendComments(lines, entry.comments || []);
       }
 
       if (entry.type === "many") {
-        if (entry.selected.length) {
+        if (entry.selected && entry.selected.length) {
           lines.push("Selected:");
           entry.selected.forEach((item) => lines.push(`- ${item.title}`));
-        } else {
-          lines.push("Selected: none");
         }
-        if (entry.added.length) {
-          lines.push("Added:");
-          entry.added.forEach((added) => lines.push(`- ${added.title || added}`));
+        if (entry.added && entry.added.length) {
+          lines.push("Added custom items:");
+          entry.added.forEach((added) => {
+            const selected = added.selected ? "selected" : "not selected";
+            const comment = added.comment ? ` Comment: ${added.comment}` : "";
+            lines.push(`- ${added.title || added} (${selected})${comment}`);
+          });
         }
-        appendComments(lines, entry.comments);
+        appendComments(lines, entry.comments || []);
       }
 
       if (entry.type === "rank") {
-        lines.push("Order:");
-        entry.order.forEach((item, index) => lines.push(`${index + 1}. ${item.title}`));
-        appendComments(lines, entry.comments);
-        if (entry.overallComment) lines.push(`Overall comment: ${entry.overallComment}`);
-      }
-
-      if (entry.type === "allocate") {
-        lines.push(`Budget: ${entry.used} of ${entry.total} used, ${entry.remaining} remaining.`);
-        entry.allocations.forEach((allocation) => {
-          const comment = allocation.comment ? ` Comment: ${allocation.comment}` : "";
-          lines.push(`- ${allocation.title}: ${allocation.points}${comment}`);
-        });
+        if (entry.order && entry.order.length) {
+          lines.push("Order:");
+          entry.order.forEach((item, index) => lines.push(`${index + 1}. ${item.title}`));
+        }
+        appendComments(lines, entry.comments || []);
       }
 
       if (entry.type === "sort") {
-        Object.keys(entry.buckets).forEach((bucket) => {
+        Object.keys(entry.buckets || {}).forEach((bucket) => {
           lines.push(`${bucket}:`);
           if (entry.buckets[bucket].length) {
             entry.buckets[bucket].forEach((item) => {
@@ -380,36 +456,28 @@
             lines.push("- none");
           }
         });
-        if (entry.unset.length) {
+        if (entry.unset && entry.unset.length) {
           lines.push("Unsorted:");
           entry.unset.forEach((item) => lines.push(`- ${item.title}`));
         }
-        if (entry.overallComment) lines.push(`Overall comment: ${entry.overallComment}`);
       }
 
       if (entry.type === "review") {
         entry.items.forEach((item) => {
-          lines.push(`- ${item.original}`);
-          lines.push(`  Verdict: ${item.verdict || "none"}`);
-          if (item.edited && item.edited !== item.original) lines.push(`  Edited: ${item.edited}`);
+          const label = item.added || item.title || "Custom item";
+          lines.push(`- ${label}`);
+          if (item.verdict) lines.push(`  Verdict: ${item.verdict}`);
+          if (item.edited) lines.push(`  Edited: ${item.edited}`);
           if (item.comment) lines.push(`  Comment: ${item.comment}`);
         });
-        if (entry.added.length) {
-          lines.push("Added:");
-          entry.added.forEach((added) => lines.push(`- ${added.title || added}`));
-        }
       }
 
       if (entry.type === "redline") {
-        lines.push("Edited artifact:");
-        lines.push("```");
-        lines.push(entry.content || "");
-        lines.push("```");
-        if (entry.lineComments.length) {
-          lines.push("Line comments:");
-          entry.lineComments.forEach((line) => {
-            if (line.comment) lines.push(`- Line ${line.line}: ${line.comment}`);
-          });
+        if (entry.content !== undefined) {
+          lines.push("Edited artifact:");
+          lines.push("```");
+          lines.push(entry.content || "");
+          lines.push("```");
         }
         if (entry.summary) lines.push(`Overall comment: ${entry.summary}`);
       }
@@ -427,24 +495,58 @@
     filled.forEach((entry) => lines.push(`- ${entry.title}: ${entry.comment}`));
   }
 
+  function isAnswerChanged(questionDef, answer) {
+    if (!answer) return false;
+    if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
+    if (questionDef.type === "one") return Boolean(answer.selected || itemComments(answerItems(questionDef, answer), answer.comments).length);
+    if (questionDef.type === "many") {
+      return Boolean(asArray(answer.selected).length || asArray(answer.added).length || itemComments(answerItems(questionDef, answer), answer.comments).length);
+    }
+    if (questionDef.type === "rank") {
+      const defaultOrder = questionDef.items.map((entry) => entry.id).join("|");
+      return Boolean(
+        asArray(answer.order).join("|") !== defaultOrder ||
+        itemComments(questionDef.items, answer.comments).length
+      );
+    }
+    if (questionDef.type === "sort") {
+      return Boolean(
+        Object.values(safeObject(answer.buckets)).some(Boolean) ||
+        itemComments(questionDef.items, answer.comments).length
+      );
+    }
+    if (questionDef.type === "review") {
+      const defaultVerdict = defaultReviewVerdict(questionDef);
+      return answerItems(questionDef, answer).some((entry) => {
+        const edited = answer.edits && answer.edits[entry.id] || entry.title;
+        const verdict = answer.verdicts && answer.verdicts[entry.id] || "";
+        return Boolean(entry.custom || verdict && verdict !== defaultVerdict || answer.comments && answer.comments[entry.id] || edited !== entry.title);
+      });
+    }
+    if (questionDef.type === "redline") {
+      return Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary);
+    }
+    return false;
+  }
+
   // Rendering and styles -----------------------------------------------------
 
   const styles = `
     :root {
       color-scheme: light;
-      --ih-bg: #f6f7f4;
+      --ih-bg: #f7f8f5;
       --ih-surface: #fffefa;
-      --ih-surface-2: #eef3f0;
-      --ih-ink: #1f2328;
-      --ih-muted: #626a73;
-      --ih-line: #d8ddd6;
+      --ih-surface-2: #eef2f0;
+      --ih-ink: #20242a;
+      --ih-muted: #68717b;
+      --ih-line: #d9ded7;
       --ih-line-strong: #aeb8b1;
       --ih-accent: #2457ff;
       --ih-accent-soft: #e8edff;
       --ih-good: #0d7d48;
       --ih-warn: #9a5d00;
       --ih-danger: #a73535;
-      --ih-shadow: 0 18px 42px rgba(31, 35, 40, .1);
+      --ih-shadow: 0 18px 44px rgba(32, 36, 42, .12);
       --ih-radius: 8px;
       --ih-max: 1480px;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -454,8 +556,8 @@
     .ih-app { min-height: 100vh; background: var(--ih-bg); color: var(--ih-ink); }
     .ih-app button, .ih-app input, .ih-app textarea, .ih-app select { font: inherit; }
     .ih-app button { cursor: pointer; color: inherit; }
-    .ih-app button:focus-visible, .ih-app input:focus-visible, .ih-app textarea:focus-visible, .ih-app select:focus-visible {
-      outline: 3px solid rgba(36, 87, 255, .35);
+    .ih-app button:focus-visible, .ih-app input:focus-visible, .ih-app textarea:focus-visible, .ih-app select:focus-visible, .cm-editor.cm-focused {
+      outline: 3px solid rgba(36, 87, 255, .32);
       outline-offset: 2px;
     }
 
@@ -464,24 +566,22 @@
       top: 0;
       z-index: 20;
       border-bottom: 1px solid var(--ih-line);
-      background: color-mix(in srgb, var(--ih-bg) 90%, transparent);
+      background: color-mix(in srgb, var(--ih-bg) 92%, transparent);
       backdrop-filter: blur(16px);
     }
-
     .ih-topbar-inner {
       max-width: var(--ih-max);
       margin: 0 auto;
-      padding: 14px clamp(14px, 3vw, 34px);
+      padding: 12px clamp(14px, 3vw, 34px);
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 16px;
-      align-items: center;
+      align-items: start;
     }
-
-    .ih-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .ih-brand { display: flex; align-items: start; gap: 12px; min-width: 0; }
     .ih-mark {
-      width: 38px;
-      height: 38px;
+      width: 34px;
+      height: 34px;
       border-radius: 8px;
       display: grid;
       place-items: center;
@@ -489,45 +589,46 @@
       color: var(--ih-surface);
       font-weight: 850;
       flex: 0 0 auto;
+      font-size: 13px;
     }
-    .ih-title { margin: 0; font-size: clamp(18px, 2vw, 24px); line-height: 1.05; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ih-intro { margin: 3px 0 0; color: var(--ih-muted); font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ih-title { margin: 0; max-width: 980px; font-size: clamp(18px, 2vw, 24px); line-height: 1.15; letter-spacing: 0; overflow-wrap: anywhere; }
+    .ih-intro { margin: 4px 0 0; max-width: 980px; color: var(--ih-muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
     .ih-actions { display: flex; gap: 8px; justify-content: end; flex-wrap: wrap; }
 
-    .ih-progress { max-width: var(--ih-max); margin: 0 auto; padding: 0 clamp(14px, 3vw, 34px) 12px; }
-    .ih-progress-track { height: 7px; border-radius: 999px; overflow: hidden; background: var(--ih-line); }
-    .ih-progress-fill { height: 100%; width: 0%; border-radius: inherit; background: var(--ih-accent); transition: width .22s ease; }
+    .ih-timeline { max-width: var(--ih-max); margin: 0 auto; padding: 0 clamp(14px, 3vw, 34px) 10px; }
+    .ih-timeline-list { position: relative; display: flex; align-items: center; gap: clamp(8px, 1.4vw, 16px); overflow-x: auto; padding: 5px 0; }
+    .ih-timeline-list::before { content: ""; position: absolute; left: 12px; right: 12px; top: 50%; height: 2px; background: var(--ih-line); transform: translateY(-50%); }
+    .ih-timeline-dot {
+      position: relative;
+      z-index: 1;
+      width: 23px;
+      height: 23px;
+      flex: 0 0 auto;
+      border: 2px solid var(--ih-line-strong);
+      border-radius: 999px;
+      background: var(--ih-surface);
+      color: transparent;
+      padding: 0;
+    }
+    .ih-timeline-dot.is-active { border-color: var(--ih-accent); box-shadow: 0 0 0 4px var(--ih-accent-soft); }
+    .ih-timeline-dot.is-answered { border-color: var(--ih-good); background: var(--ih-good); }
+    .ih-timeline-dot.is-export.is-waiting { border-color: var(--ih-warn); background: #ffd45c; }
+    .ih-timeline-dot.is-export.is-ready { border-color: var(--ih-good); background: var(--ih-good); }
 
     .ih-main {
       max-width: var(--ih-max);
       margin: 0 auto;
-      padding: clamp(24px, 4vw, 52px) clamp(14px, 3vw, 34px) 118px;
+      padding: clamp(22px, 4vw, 48px) clamp(14px, 3vw, 34px) 104px;
     }
-
-    .ih-step { animation: ihFadeIn .18s ease both; }
-    @keyframes ihFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-
-    .ih-question-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-      gap: clamp(18px, 3vw, 34px);
-      align-items: end;
-      margin-bottom: clamp(18px, 3vw, 32px);
-    }
-    .ih-kicker { margin: 0 0 10px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
-    .ih-prompt { margin: 0; max-width: 1040px; font-size: clamp(34px, 5.6vw, 76px); line-height: .96; letter-spacing: 0; }
-    .ih-help { margin: 14px 0 0; max-width: 820px; color: var(--ih-muted); line-height: 1.52; font-size: clamp(15px, 1.3vw, 18px); }
-    .ih-side {
-      border: 1px solid var(--ih-line);
-      border-radius: var(--ih-radius);
-      background: color-mix(in srgb, var(--ih-surface) 78%, transparent);
-      padding: 16px;
-    }
-    .ih-side strong { display: block; font-size: 14px; margin-bottom: 6px; }
-    .ih-side p { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.45; }
+    .ih-main.is-all { display: grid; gap: 44px; padding-bottom: 58px; }
+    .ih-step { min-width: 0; scroll-margin-top: 118px; }
+    .ih-question-head { margin-bottom: clamp(16px, 2.4vw, 24px); }
+    .ih-kicker { margin: 0 0 8px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
+    .ih-prompt { margin: 0; max-width: 980px; font-size: clamp(22px, 2.5vw, 34px); line-height: 1.12; letter-spacing: 0; }
+    .ih-help { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
 
     .ih-btn {
-      min-height: 38px;
+      min-height: 36px;
       border: 1px solid var(--ih-line);
       border-radius: 999px;
       background: var(--ih-surface);
@@ -535,7 +636,7 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 9px 13px;
+      padding: 8px 12px;
       font-weight: 760;
       font-size: 13px;
     }
@@ -543,156 +644,210 @@
     .ih-btn:disabled { opacity: .45; cursor: not-allowed; }
     .ih-app .ih-btn-primary { background: var(--ih-ink); color: #fff; border-color: var(--ih-ink); box-shadow: var(--ih-shadow); }
     .ih-app .ih-btn-accent { background: var(--ih-accent); color: #fff; border-color: var(--ih-accent); }
+    .ih-mode-toggle { min-width: 124px; }
 
-    .ih-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: stretch; }
-    .ih-stack { display: grid; gap: 14px; }
+    .ih-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; align-items: start; }
+    .ih-stack { display: grid; gap: 10px; }
     .ih-card {
       border: 1px solid var(--ih-line);
       border-radius: var(--ih-radius);
       background: var(--ih-surface);
-      padding: 16px;
+      padding: 14px;
       min-width: 0;
-      box-shadow: 0 1px 0 rgba(255,255,255,.65) inset;
+      align-content: start;
     }
     .ih-choice {
       text-align: left;
       display: grid;
       gap: 10px;
-      min-height: 160px;
-      border: 2px solid transparent;
-      transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+      min-height: 118px;
+      border: 1px solid var(--ih-line);
+      transition: border-color .12s ease, box-shadow .12s ease;
+      align-content: start;
     }
-    .ih-choice:hover { transform: translateY(-2px); border-color: var(--ih-line-strong); box-shadow: var(--ih-shadow); }
-    .ih-choice.is-selected { border-color: var(--ih-accent); box-shadow: 0 0 0 4px var(--ih-accent-soft); }
-    .ih-item-top { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
-    .ih-item-title { margin: 0; font-size: clamp(18px, 1.6vw, 23px); line-height: 1.1; letter-spacing: 0; }
-    .ih-select-dot {
-      width: 34px;
-      height: 34px;
+    .ih-choice:hover { border-color: var(--ih-line-strong); box-shadow: 0 8px 22px rgba(32, 36, 42, .08); }
+    .ih-choice.is-selected { border-color: var(--ih-accent); box-shadow: 0 0 0 3px var(--ih-accent-soft); }
+    .ih-item-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+    .ih-item-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .ih-item-title { margin: 0; font-size: clamp(16px, 1.25vw, 20px); line-height: 1.18; letter-spacing: 0; }
+    .ih-select-dot, .ih-icon-btn, .ih-comment-button, .ih-remove-icon {
+      width: 32px;
+      height: 32px;
       flex: 0 0 auto;
       border: 1px solid var(--ih-line-strong);
       border-radius: 999px;
       display: grid;
       place-items: center;
       color: var(--ih-muted);
-      background: white;
+      background: #fff;
       font-weight: 850;
+      padding: 0;
     }
     .ih-choice.is-selected .ih-select-dot { color: white; background: var(--ih-accent); border-color: var(--ih-accent); }
+    .ih-comment-button svg, .ih-remove-icon svg { width: 16px; height: 16px; }
+    .ih-comment-button { border-color: transparent; background: color-mix(in srgb, var(--ih-accent) 12%, white); color: var(--ih-accent); }
+    .ih-comment-button:hover { background: color-mix(in srgb, var(--ih-accent) 18%, white); color: var(--ih-accent); }
+    .ih-comment-button.has-comment { color: #fff; border-color: transparent; background: var(--ih-accent); }
+    .ih-remove-icon { color: var(--ih-danger); }
     .ih-meta { display: flex; flex-wrap: wrap; gap: 6px; }
     .ih-pill { border: 1px solid var(--ih-line); border-radius: 999px; padding: 4px 8px; color: var(--ih-muted); background: white; font-size: 12px; font-weight: 700; }
-    .ih-comment { margin-top: 10px; }
-    .ih-field, .ih-comment textarea, .ih-line-comment textarea {
+    .ih-label { display: block; font-size: 12px; color: var(--ih-muted); font-weight: 760; margin-bottom: 6px; }
+    .ih-field {
       width: 100%;
       border: 1px solid var(--ih-line);
       border-radius: var(--ih-radius);
       background: #fff;
       color: var(--ih-ink);
-      padding: 11px 12px;
-      min-height: 46px;
+      padding: 10px 11px;
+      min-height: 42px;
       resize: vertical;
     }
-    .ih-field-large { min-height: 180px; }
-    .ih-comment textarea { min-height: 72px; background: #fbfcfa; }
-    .ih-label { display: block; font-size: 12px; color: var(--ih-muted); font-weight: 760; margin-bottom: 6px; }
+    .ih-field-large { min-height: 178px; }
+    .ih-auto-field { overflow: hidden; resize: none; }
+    .ih-custom-title { min-height: 58px; font-weight: 760; }
 
-    .ih-rich { min-width: 0; color: var(--ih-muted); line-height: 1.45; }
+    .ih-rich { min-width: 0; color: var(--ih-muted); line-height: 1.45; display: grid; gap: 12px; align-content: start; }
     .ih-rich p { margin: 0; }
+    .ih-rich ul { margin: 8px 0 0; }
     .ih-frame { width: 100%; height: min(54vh, 520px); border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: white; }
-    .ih-html-preview { border: 1px solid var(--ih-line); border-radius: var(--ih-radius); padding: 12px; background: #f8faf7; overflow: auto; }
-    .ih-pros-cons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .ih-pros, .ih-cons { border-radius: var(--ih-radius); padding: 12px; border: 1px solid var(--ih-line); background: #fff; }
+    .ih-html-preview { overflow: auto; }
+    .ih-html-preview > * + * { margin-top: 9px; }
+    .ih-html-preview figure { margin: 0; display: grid; gap: 6px; }
+    .ih-html-preview img { display: block; width: 100%; max-height: 240px; object-fit: cover; border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: var(--ih-surface-2); }
+    .ih-html-preview figcaption { color: var(--ih-muted); font-size: 12px; }
+    .ih-html-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .ih-html-preview th, .ih-html-preview td { border-bottom: 1px solid var(--ih-line); padding: 6px 7px; text-align: left; vertical-align: top; }
+    .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
+    .ih-html-preview .ih-mini-callout { border-left: 3px solid var(--ih-accent); padding: 7px 9px; background: var(--ih-surface-2); color: var(--ih-ink); }
+    .ih-pros-cons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 0; }
+    .ih-pros, .ih-cons { padding: 0; border: 0; background: transparent; }
+    .ih-pros strong, .ih-cons strong { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
     .ih-pros strong { color: var(--ih-good); }
     .ih-cons strong { color: var(--ih-danger); }
-    .ih-pros ul, .ih-cons ul { margin: 8px 0 0; padding-left: 18px; }
-    .ih-code { margin: 0; border-radius: var(--ih-radius); background: #171817; color: #f8f8ef; padding: 14px; overflow: auto; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ih-pros ul, .ih-cons ul { margin: 0; padding-left: 18px; }
+    .ih-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 14px; }
+    .ih-add-row textarea { min-height: 70px; }
+    .ih-add-row .ih-btn { justify-self: start; }
+    .ih-compact-list { display: grid; gap: 8px; }
+    .ih-rank-item, .ih-sort-card {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: start;
+      border: 1px solid var(--ih-line);
+      border-radius: var(--ih-radius);
+      background: white;
+      padding: 9px 10px;
+      font-size: 13px;
+    }
+    .ih-rank-item .ih-item-title, .ih-sort-card .ih-item-title { font-size: 14px; line-height: 1.25; }
+    .ih-rank-item .ih-rich, .ih-sort-card .ih-rich { font-size: 12px; line-height: 1.35; }
+    .ih-rank-item.is-dragging, .ih-sort-card.is-dragging { opacity: .55; }
+    .ih-rank-item.is-drop-target, .ih-bucket.is-drop-target { border-color: var(--ih-accent); box-shadow: 0 0 0 3px var(--ih-accent-soft); }
+    .ih-rank-item { grid-template-columns: 20px 34px minmax(0, 1fr) auto; align-items: start; }
+    .ih-rank-num { width: 28px; height: 28px; display: grid; place-items: center; color: var(--ih-ink); background: var(--ih-surface-2); border-radius: 999px; font-size: 12px; font-weight: 850; }
+    .ih-grip {
+      width: 18px;
+      height: 30px;
+      border: 0;
+      background:
+        radial-gradient(circle, var(--ih-line-strong) 1.4px, transparent 1.7px) 0 0 / 8px 8px;
+      opacity: .9;
+      cursor: grab;
+      align-self: center;
+    }
+    .ih-grip:active { cursor: grabbing; }
+    .ih-sort-frame { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
+    .ih-sort-board { display: flex; align-items: start; gap: 12px; min-width: max-content; }
+    .ih-bucket { width: min(280px, calc(100vw - 64px)); flex: 0 0 min(280px, calc(100vw - 64px)); border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    .ih-bucket[data-bucket-id=""] { width: min(340px, calc(100vw - 64px)); flex-basis: min(340px, calc(100vw - 64px)); }
+    .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
+    .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
+    .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
+    .ih-number { width: 72px; min-height: 38px; border: 1px solid var(--ih-line); border-radius: var(--ih-radius); padding: 8px; }
 
-    .ih-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
-    .ih-rank-list { display: grid; gap: 10px; counter-reset: rank; }
-    .ih-rank-item { counter-increment: rank; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
-    .ih-rank-num { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; background: var(--ih-accent-soft); color: var(--ih-accent); font-weight: 850; }
-    .ih-rank-controls { display: flex; gap: 6px; }
-    .ih-icon-btn { width: 34px; height: 34px; border: 1px solid var(--ih-line); border-radius: 999px; background: white; display: grid; place-items: center; font-weight: 850; }
+    .ih-review-card { display: grid; gap: 10px; }
+    .ih-review-row { display: grid; gap: 9px; }
+    .ih-review-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .ih-verdict-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      overflow: hidden;
+      box-shadow: none;
+    }
+    .ih-app .ih-verb, .ih-app .ih-added-pill { font-size: 12px; font-weight: 850; line-height: 1; }
+    .ih-verb {
+      min-width: 38px;
+      min-height: 36px;
+      border: 0;
+      background: color-mix(in srgb, var(--ih-verdict-color, var(--ih-accent)) 26%, white);
+      padding: 0 11px;
+      color: transparent;
+      white-space: nowrap;
+      transition: min-width .14s ease, background-color .14s ease, color .14s ease;
+    }
+    .ih-verb:hover { background: color-mix(in srgb, var(--ih-verdict-color, var(--ih-accent)) 40%, white); }
+    .ih-verb.is-selected { min-width: 98px; color: white; background: var(--ih-verdict-color, var(--ih-accent)); }
+    .ih-added-pill { min-width: 98px; min-height: 36px; border-radius: 999px; display: inline-grid; place-items: center; padding: 0 14px; background: var(--ih-good); color: white; }
 
-    .ih-allocation-row { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(160px, 1fr) 86px; gap: 14px; align-items: center; }
-    .ih-range { width: 100%; accent-color: var(--ih-accent); }
-    .ih-number { width: 78px; min-height: 40px; border: 1px solid var(--ih-line); border-radius: var(--ih-radius); padding: 8px; }
-    .ih-budget { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--ih-muted); font-weight: 760; }
-    .ih-budget strong { color: var(--ih-ink); }
-
-    .ih-sort-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-    .ih-bucket { border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 78%, var(--ih-surface-2)); padding: 12px; min-height: 150px; }
-    .ih-bucket-title { font-weight: 850; margin-bottom: 10px; }
-    .ih-chip { border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: white; padding: 9px 10px; margin-bottom: 8px; font-size: 13px; }
-    .ih-select { width: 100%; min-height: 40px; border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: white; padding: 8px 10px; }
-
-    .ih-review-row { display: grid; grid-template-columns: minmax(180px, .6fr) minmax(240px, 1fr) minmax(220px, .8fr); gap: 12px; align-items: start; }
-    .ih-verbs { display: flex; gap: 6px; flex-wrap: wrap; }
-    .ih-verb { border: 1px solid var(--ih-line); border-radius: 999px; background: white; padding: 6px 10px; font-size: 12px; font-weight: 760; }
-    .ih-verb.is-selected { border-color: var(--ih-accent); background: var(--ih-accent-soft); color: var(--ih-accent); }
-
-    .ih-redline { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(280px, .95fr); gap: 16px; align-items: start; }
-    .ih-line-comments { display: grid; gap: 10px; max-height: 68vh; overflow: auto; }
-    .ih-line-comment { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; align-items: start; }
-    .ih-line-no { padding-top: 10px; color: var(--ih-muted); font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: right; }
+    .ih-redline { display: grid; gap: 10px; }
+    .ih-code-editor-host, .ih-code-fallback, .ih-code-viewer-host, .ih-code-viewer-fallback {
+      min-height: 440px;
+      border: 1px solid var(--ih-line);
+      border-radius: var(--ih-radius);
+      background: #282c34;
+      color: #abb2bf;
+      overflow: hidden;
+    }
+    .ih-code-editor-host, .ih-code-viewer-host { display: none; }
+    .ih-code-editor-host .cm-editor { min-height: 440px; }
+    .ih-code-editor-host .cm-editor, .ih-code-viewer-host .cm-editor { font-size: 13px; }
+    .ih-code-editor-host .cm-scroller, .ih-code-viewer-host .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; }
+    .ih-code-fallback { display: block; width: 100%; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; white-space: pre; }
+    [data-redline].has-editor .ih-code-editor-host { display: block; }
+    [data-redline].has-editor .ih-code-fallback { display: none; }
+    .ih-code-viewer { display: grid; margin-top: 8px; }
+    .ih-code-viewer-host, .ih-code-viewer-fallback { min-height: 0; }
+    .ih-code-viewer-host .cm-editor { min-height: 0; }
+    .ih-code-viewer.has-editor .ih-code-viewer-host { display: block; }
+    .ih-code-viewer.has-editor .ih-code-viewer-fallback { display: none; }
+    .ih-code-viewer-fallback { margin: 0; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+    .ih-editor-loading { color: var(--ih-muted); font-size: 13px; padding: 12px 0 0; }
 
     .ih-export { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
     .ih-output { min-height: 420px; max-height: 62vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #171817; color: #f8f8ef; border-radius: var(--ih-radius); padding: 16px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-    .ih-bottom {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 30;
-      border-top: 1px solid var(--ih-line);
-      background: color-mix(in srgb, var(--ih-bg) 90%, transparent);
-      backdrop-filter: blur(16px);
-    }
-    .ih-bottom-inner {
-      max-width: var(--ih-max);
-      margin: 0 auto;
-      padding: 12px clamp(14px, 3vw, 34px);
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      gap: 12px;
-      align-items: center;
-    }
-    .ih-status { color: var(--ih-muted); text-align: center; font-size: 13px; line-height: 1.35; }
-    .ih-toast {
-      position: fixed;
-      right: 20px;
-      bottom: 86px;
-      z-index: 40;
-      background: var(--ih-ink);
-      color: var(--ih-surface);
-      border-radius: 999px;
-      padding: 11px 14px;
-      box-shadow: var(--ih-shadow);
-      font-weight: 760;
-      opacity: 0;
-      transform: translateY(10px);
-      pointer-events: none;
-      transition: opacity .18s ease, transform .18s ease;
-    }
+    .ih-bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; border-top: 1px solid var(--ih-line); background: color-mix(in srgb, var(--ih-bg) 92%, transparent); backdrop-filter: blur(16px); }
+    .ih-bottom-inner { max-width: var(--ih-max); margin: 0 auto; padding: 11px clamp(14px, 3vw, 34px); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .ih-toast { position: fixed; right: 20px; bottom: 78px; z-index: 60; background: var(--ih-ink); color: var(--ih-surface); border-radius: 999px; padding: 11px 14px; box-shadow: var(--ih-shadow); font-weight: 760; opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
     .ih-toast.is-visible { opacity: 1; transform: none; }
 
+    .ih-comment-popover-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(32, 36, 42, .28); display: grid; place-items: center; padding: 18px; }
+    .ih-comment-popover { width: min(720px, 100%); border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: var(--ih-surface); box-shadow: var(--ih-shadow); padding: 14px; }
+    .ih-comment-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .ih-comment-head h3 { margin: 0; font-size: 16px; }
+    .ih-comment-popover textarea { min-height: 150px; max-height: 55vh; width: 100%; resize: none; line-height: 1.45; }
+
     @media (max-width: 900px) {
-      .ih-topbar-inner, .ih-bottom-inner, .ih-question-head, .ih-export, .ih-redline { grid-template-columns: 1fr; }
+      .ih-topbar-inner, .ih-export { grid-template-columns: 1fr; }
       .ih-actions { justify-content: start; }
       .ih-title, .ih-intro { white-space: normal; }
-      .ih-prompt { font-size: clamp(30px, 11vw, 54px); }
-      .ih-side { display: none; }
-      .ih-pros-cons, .ih-review-row, .ih-allocation-row { grid-template-columns: 1fr; }
-      .ih-status { text-align: left; }
+      .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
+      .ih-pros-cons { grid-template-columns: 1fr; }
+      .ih-bottom-inner { align-items: stretch; }
     }
   `;
 
   function renderApp(instance) {
-    const totalSteps = instance.config.questions.length + 1;
+    const viewMode = instance.viewMode();
     const isExport = instance.state.step >= instance.config.questions.length;
-    const progress = ((instance.state.step + 1) / totalSteps) * 100;
-    const stepHtml = isExport ? renderExportStep(instance) : renderQuestionStep(instance);
+    const stepHtml = viewMode === "all"
+      ? renderAllQuestions(instance)
+      : isExport ? renderExportStep(instance) : renderQuestionStep(instance, instance.config.questions[instance.state.step], instance.state.step);
 
     instance.root.innerHTML = `
       <div class="ih-app">
@@ -706,40 +861,65 @@
               </div>
             </div>
             <div class="ih-actions">
-              <button class="ih-btn ih-btn-primary" type="button" data-action="copy-text">${escapeHTML(instance.config.copyTextLabel)}</button>
-              <button class="ih-btn" type="button" data-action="copy-json">${escapeHTML(instance.config.copyJsonLabel)}</button>
+              <button class="ih-btn ih-mode-toggle" type="button" data-action="toggle-mode">${viewMode === "all" ? "One per page" : "All questions"}</button>
               <button class="ih-btn" type="button" data-action="reset">Reset</button>
             </div>
           </div>
-          <div class="ih-progress" aria-hidden="true"><div class="ih-progress-track"><div class="ih-progress-fill" style="width:${progress}%"></div></div></div>
+          ${renderTimeline(instance)}
         </header>
-        <main class="ih-main">${stepHtml}</main>
-        <footer class="ih-bottom">
+        <main class="ih-main ${viewMode === "all" ? "is-all" : ""}">${stepHtml}</main>
+        ${viewMode === "paged" ? `<footer class="ih-bottom">
           <div class="ih-bottom-inner">
             <button class="ih-btn" type="button" data-action="back" ${instance.state.step === 0 ? "disabled" : ""}>Back</button>
-            <div class="ih-status">${escapeHTML(statusText(instance))}</div>
             <button class="ih-btn ih-btn-primary" type="button" data-action="next">${escapeHTML(nextLabel(instance))}</button>
           </div>
-        </footer>
+        </footer>` : ""}
+        ${renderCommentPopover(instance)}
         <div class="ih-toast" role="status" aria-live="polite"></div>
       </div>
     `;
   }
 
-  function renderQuestionStep(instance) {
-    const questionDef = instance.config.questions[instance.state.step];
+  function renderAllQuestions(instance) {
+    return [
+      ...instance.config.questions.map((questionDef, index) => renderQuestionStep(instance, questionDef, index)),
+      renderExportStep(instance)
+    ].join("");
+  }
+
+  function renderTimeline(instance) {
+    const ready = isInterviewReady(instance);
+    const questionDots = instance.config.questions.map((questionDef, index) => {
+      const state = timelineState(instance, questionDef, index);
+      const label = `${index + 1}. ${questionDef.prompt}`;
+      return `<button class="ih-timeline-dot ${state}" type="button" data-action="jump" data-step="${index}" title="${escapeAttr(label)}" aria-label="${escapeAttr(label)}"></button>`;
+    }).join("");
+    const exportState = [
+      "ih-timeline-dot",
+      "is-export",
+      instance.state.step >= instance.config.questions.length ? "is-active" : "",
+      ready ? "is-ready" : "is-waiting"
+    ].filter(Boolean).join(" ");
+    const exportLabel = ready ? "Output ready to export" : "Output waiting for required answers";
     return `
-      <section class="ih-step" data-question-id="${escapeAttr(questionDef.id)}">
+      <nav class="ih-timeline" aria-label="Interview questions">
+        <div class="ih-timeline-list">
+          ${questionDots}
+          <button class="${exportState}" type="button" data-action="jump" data-step="${instance.config.questions.length}" title="${escapeAttr(exportLabel)}" aria-label="${escapeAttr(exportLabel)}"></button>
+        </div>
+      </nav>
+    `;
+  }
+
+  function renderQuestionStep(instance, questionDef, index) {
+    return `
+      <section class="ih-step" id="ih-question-${index}" data-question-id="${escapeAttr(questionDef.id)}" data-question-index="${index}">
         <div class="ih-question-head">
           <div>
-            <p class="ih-kicker">Question ${instance.state.step + 1} / ${instance.config.questions.length}</p>
+            <p class="ih-kicker">Question ${index + 1} / ${instance.config.questions.length}</p>
             <h2 class="ih-prompt">${escapeHTML(questionDef.prompt)}</h2>
             ${questionDef.help ? `<p class="ih-help">${escapeHTML(questionDef.help)}</p>` : ""}
           </div>
-          <aside class="ih-side">
-            <strong>${escapeHTML(sideLabel(questionDef.type))}</strong>
-            <p>${escapeHTML(sideText(questionDef.type))}</p>
-          </aside>
         </div>
         ${renderQuestionBody(questionDef, instance.state.answers[questionDef.id])}
       </section>
@@ -751,7 +931,6 @@
     if (questionDef.type === "one") return renderChoice(questionDef, answer, false);
     if (questionDef.type === "many") return renderChoice(questionDef, answer, true);
     if (questionDef.type === "rank") return renderRank(questionDef, answer);
-    if (questionDef.type === "allocate") return renderAllocate(questionDef, answer);
     if (questionDef.type === "sort") return renderSort(questionDef, answer);
     if (questionDef.type === "review") return renderReview(questionDef, answer);
     if (questionDef.type === "redline") return renderRedline(questionDef, answer);
@@ -770,50 +949,34 @@
   function renderChoice(questionDef, answer, multiple) {
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
     const gridClass = questionDef.items.some((entry) => entry.body) ? "ih-grid" : "ih-stack";
-    const items = questionDef.items.map((entry) => renderChoiceItem(entry, answer, selected.includes(entry.id), multiple)).join("");
-    const added = multiple ? renderAddedItems(answer) : "";
+    const items = answerItems(questionDef, answer).map((entry) => renderChoiceItem(entry, answer, selected.includes(entry.id), multiple)).join("");
     const addRow = multiple && questionDef.allowAdd ? renderAddRow("Add another item") : "";
-    return `<div class="${gridClass}">${items}</div>${added}${addRow}`;
+    return `<div class="${gridClass}">${items}</div>${addRow}`;
   }
 
   function renderChoiceItem(entry, answer, isSelected, multiple) {
+    const action = entry.custom ? "" : ` data-action="${multiple ? "toggle-many" : "select-one"}" tabindex="0"`;
     return `
-      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-item-id="${escapeAttr(entry.id)}" data-action="${multiple ? "toggle-many" : "select-one"}" tabindex="0">
+      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-item-id="${escapeAttr(entry.id)}"${action}>
         <div class="ih-item-top">
-          <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-          <span class="ih-select-dot">${isSelected ? "✓" : "+"}</span>
+          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-item-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom item text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>`}
+          <div class="ih-item-actions">
+            ${entry.custom ? "" : renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on item")}
+            ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-item-id="${escapeAttr(entry.id)}" aria-label="Remove custom item">${trashIcon()}</button>` : ""}
+            ${entry.custom ? "" : `<span class="ih-select-dot">${isSelected ? "✓" : "+"}</span>`}
+          </div>
         </div>
         ${renderMeta(entry.meta)}
         ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
-        <div class="ih-comment">
-          <label class="ih-label" for="comment-${escapeAttr(entry.id)}">Comment</label>
-          <textarea id="comment-${escapeAttr(entry.id)}" data-input="item-comment" data-item-id="${escapeAttr(entry.id)}" placeholder="What should the agent know about this item?">${escapeHTML(answer.comments && answer.comments[entry.id] || "")}</textarea>
-        </div>
       </article>
-    `;
-  }
-
-  function renderAddedItems(answer) {
-    if (!answer.added || !answer.added.length) return "";
-    return `
-      <div class="ih-stack" style="margin-top:16px">
-        ${answer.added.map((entry, index) => `
-          <div class="ih-card">
-            <div class="ih-item-top">
-              <h3 class="ih-item-title">${escapeHTML(entry.title || entry)}</h3>
-              <button class="ih-icon-btn" type="button" data-action="remove-added" data-added-index="${index}" aria-label="Remove added item">×</button>
-            </div>
-          </div>
-        `).join("")}
-      </div>
     `;
   }
 
   function renderAddRow(label) {
     return `
-      <div class="ih-card ih-add-row" style="margin-top:16px">
-        <input class="ih-field" data-input="add-text" placeholder="${escapeAttr(label)}">
-        <button class="ih-btn ih-btn-accent" type="button" data-action="add-item">Add</button>
+      <div class="ih-card ih-add-row">
+        <textarea class="ih-field ih-add-custom ih-auto-field" data-input="add-text" rows="2" placeholder="${escapeAttr(label)}"></textarea>
+        <button class="ih-btn ih-btn-accent" type="button" data-action="add-item">Add item</button>
       </div>
     `;
   }
@@ -822,55 +985,18 @@
     const order = asArray(answer.order).filter((id) => questionDef.items.some((entry) => entry.id === id));
     questionDef.items.forEach((entry) => { if (!order.includes(entry.id)) order.push(entry.id); });
     return `
-      <div class="ih-rank-list">
+      <div class="ih-rank-list ih-compact-list" data-sortable-rank>
         ${order.map((id, index) => {
           const entry = questionDef.items.find((candidate) => candidate.id === id);
           return `
-            <article class="ih-card ih-rank-item" draggable="true" data-item-id="${escapeAttr(entry.id)}">
+            <article class="ih-rank-item" data-item-id="${escapeAttr(entry.id)}">
+              <button class="ih-grip" type="button" aria-label="Drag to reorder"></button>
               <div class="ih-rank-num">${index + 1}</div>
               <div>
                 <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
                 ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
-                <div class="ih-comment">
-                  <label class="ih-label">Comment</label>
-                  <textarea data-input="item-comment" data-item-id="${escapeAttr(entry.id)}" placeholder="Why here?">${escapeHTML(answer.comments && answer.comments[entry.id] || "")}</textarea>
-                </div>
               </div>
-              <div class="ih-rank-controls">
-                <button class="ih-icon-btn" type="button" data-action="rank-up" aria-label="Move up">↑</button>
-                <button class="ih-icon-btn" type="button" data-action="rank-down" aria-label="Move down">↓</button>
-              </div>
-            </article>
-          `;
-        }).join("")}
-      </div>
-      <div class="ih-card ih-comment" style="margin-top:16px">
-        <label class="ih-label">Overall comment</label>
-        <textarea data-input="rank-comment" placeholder="Anything about the order as a whole?">${escapeHTML(answer.comment || "")}</textarea>
-      </div>
-    `;
-  }
-
-  function renderAllocate(questionDef, answer) {
-    const used = questionDef.items.reduce((sum, entry) => sum + numberOr(answer.points && answer.points[entry.id], 0), 0);
-    const remaining = questionDef.total - used;
-    return `
-      <div class="ih-budget"><strong>${remaining}</strong> of ${questionDef.total} remaining</div>
-      <div class="ih-stack">
-        ${questionDef.items.map((entry) => {
-          const points = numberOr(answer.points && answer.points[entry.id], 0);
-          return `
-            <article class="ih-card ih-allocation-row" data-item-id="${escapeAttr(entry.id)}">
-              <div>
-                <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-                ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
-              </div>
-              <input class="ih-range" type="range" min="0" max="${questionDef.total}" value="${points}" data-input="allocate" data-item-id="${escapeAttr(entry.id)}">
-              <input class="ih-number" type="number" min="0" max="${questionDef.total}" value="${points}" data-input="allocate" data-item-id="${escapeAttr(entry.id)}">
-              <div class="ih-comment" style="grid-column:1/-1">
-                <label class="ih-label">Comment</label>
-                <textarea data-input="item-comment" data-item-id="${escapeAttr(entry.id)}" placeholder="Why this weight?">${escapeHTML(answer.comments && answer.comments[entry.id] || "")}</textarea>
-              </div>
+              ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on rank item")}
             </article>
           `;
         }).join("")}
@@ -889,86 +1015,74 @@
     });
 
     return `
-      <div class="ih-sort-board">
-        ${questionDef.buckets.map((bucket) => `
-          <section class="ih-bucket">
-            <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
-            ${byBucket[bucket.id].length ? byBucket[bucket.id].map(renderChip).join("") : `<div class="ih-chip">No items yet</div>`}
-          </section>
-        `).join("")}
-        <section class="ih-bucket">
-          <div class="ih-bucket-title">Unsorted</div>
-          ${unset.length ? unset.map(renderChip).join("") : `<div class="ih-chip">None</div>`}
-        </section>
-      </div>
-      <div class="ih-stack" style="margin-top:16px">
-        ${questionDef.items.map((entry) => `
-          <article class="ih-card">
-            <div class="ih-review-row" style="grid-template-columns:minmax(180px,1fr) minmax(180px,.7fr) minmax(220px,1fr)">
-              <div>
-                <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-                ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
-              </div>
-              <select class="ih-select" data-input="sort-bucket" data-item-id="${escapeAttr(entry.id)}">
-                <option value="">Unsorted</option>
-                ${questionDef.buckets.map((bucket) => `<option value="${escapeAttr(bucket.id)}" ${answer.buckets && answer.buckets[entry.id] === bucket.id ? "selected" : ""}>${escapeHTML(bucket.title)}</option>`).join("")}
-              </select>
-              <textarea data-input="item-comment" data-item-id="${escapeAttr(entry.id)}" placeholder="Comment">${escapeHTML(answer.comments && answer.comments[entry.id] || "")}</textarea>
+      <div class="ih-sort-frame" tabindex="0" aria-label="Sort columns">
+        <div class="ih-sort-board">
+          <section class="ih-bucket" data-bucket-id="">
+            <div class="ih-bucket-title">Unsorted</div>
+            <div class="ih-bucket-list" data-sortable-sort data-bucket-id="">
+              ${unset.length ? unset.map((entry) => renderSortCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Everything is classified</div>`}
             </div>
-          </article>
-        `).join("")}
-        <div class="ih-card ih-comment">
-          <label class="ih-label">Overall comment</label>
-          <textarea data-input="sort-comment" placeholder="Anything about the classification?">${escapeHTML(answer.comment || "")}</textarea>
+          </section>
+          ${questionDef.buckets.map((bucket) => `
+            <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
+              <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
+              <div class="ih-bucket-list" data-sortable-sort data-bucket-id="${escapeAttr(bucket.id)}">
+                ${byBucket[bucket.id].length ? byBucket[bucket.id].map((entry) => renderSortCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Drop items here</div>`}
+              </div>
+            </section>
+          `).join("")}
         </div>
       </div>
+    `;
+  }
+
+  function renderSortCard(questionDef, answer, entry) {
+    return `
+      <article class="ih-sort-card" data-item-id="${escapeAttr(entry.id)}">
+        <button class="ih-grip" type="button" aria-label="Drag to bucket"></button>
+        <div>
+          <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
+          ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
+        </div>
+        ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on sort item")}
+      </article>
     `;
   }
 
   function renderReview(questionDef, answer) {
     return `
       <div class="ih-stack">
-        ${questionDef.items.map((entry) => `
-          <article class="ih-card">
+        ${answerItems(questionDef, answer).map((entry) => `
+          <article class="ih-card ih-review-card">
             <div class="ih-review-row" data-item-id="${escapeAttr(entry.id)}">
-              <div>
-                <div class="ih-verbs">
-                  ${questionDef.verbs.map((verb) => `<button class="ih-verb ${answer.verdicts && answer.verdicts[entry.id] === verb.id ? "is-selected" : ""}" type="button" data-action="review-verdict" data-item-id="${escapeAttr(entry.id)}" data-verdict="${escapeAttr(verb.id)}">${escapeHTML(verb.title)}</button>`).join("")}
+              <div class="ih-review-top">
+                ${entry.custom ? renderAddedPill() : renderVerdictPill(questionDef, answer, entry)}
+                <div class="ih-item-actions">
+                  ${entry.custom ? "" : renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on reviewed item")}
+                  ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-item-id="${escapeAttr(entry.id)}" aria-label="Remove custom item">${trashIcon()}</button>` : ""}
                 </div>
               </div>
-              <textarea class="ih-field" data-input="review-edit" data-item-id="${escapeAttr(entry.id)}">${escapeHTML(answer.edits && answer.edits[entry.id] || entry.title)}</textarea>
-              <textarea class="ih-field" data-input="item-comment" data-item-id="${escapeAttr(entry.id)}" placeholder="Replacement or note">${escapeHTML(answer.comments && answer.comments[entry.id] || "")}</textarea>
+              <textarea class="ih-field ih-auto-field" data-input="review-edit" data-item-id="${escapeAttr(entry.id)}" rows="1">${escapeHTML(answer.edits && answer.edits[entry.id] || entry.title)}</textarea>
+              ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
             </div>
-            ${entry.body ? `<div class="ih-rich" style="margin-top:10px">${renderRich(entry.body)}</div>` : ""}
           </article>
         `).join("")}
       </div>
-      ${questionDef.allowAdd ? `${renderAddedItems(answer)}${renderAddRow("Add another statement or term")}` : ""}
+      ${questionDef.allowAdd ? renderAddRow("Add another statement or term") : ""}
     `;
   }
 
   function renderRedline(questionDef, answer) {
-    const lines = String(answer.content || "").split("\n");
     return `
       <div class="ih-redline">
-        <div class="ih-card">
-          <label class="ih-label">Editable artifact</label>
-          <textarea class="ih-field ih-field-large" data-input="redline-content" spellcheck="false">${escapeHTML(answer.content || "")}</textarea>
-        </div>
-        <div class="ih-card">
-          <label class="ih-label">Line comments</label>
-          <div class="ih-line-comments">
-            ${lines.map((line, index) => `
-              <div class="ih-line-comment">
-                <div class="ih-line-no">${index + 1}</div>
-                <textarea data-input="line-comment" data-line="${index + 1}" placeholder="${escapeAttr(line.trim().slice(0, 70) || "Blank line")}">${escapeHTML(answer.comments && answer.comments[index + 1] || "")}</textarea>
-              </div>
-            `).join("")}
+        <div class="ih-card" data-redline>
+          <div class="ih-item-top">
+            <label class="ih-label">Editable artifact</label>
+            ${renderCommentButton("redline-summary", "", answer.summary || "", "Comment on edited artifact")}
           </div>
-          <div class="ih-comment">
-            <label class="ih-label">Overall artifact comment</label>
-            <textarea data-input="redline-summary" placeholder="What should the agent do with these edits?">${escapeHTML(answer.summary || "")}</textarea>
-          </div>
+          <div class="ih-code-editor-host" data-code-editor data-lang="${escapeAttr(questionDef.artifact && questionDef.artifact.lang || questionDef.language || "")}"></div>
+          <textarea class="ih-code-fallback ih-auto-field" data-input="redline-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
+          <div class="ih-editor-loading" data-editor-loading>Loading syntax editor...</div>
         </div>
       </div>
     `;
@@ -978,7 +1092,7 @@
     const text = buildTextExport(instance.config, instance.state);
     const json = JSON.stringify(buildResult(instance.config, instance.state), null, 2);
     return `
-      <section class="ih-step">
+      <section class="ih-step" id="ih-output">
         <div class="ih-question-head">
           <div>
             <p class="ih-kicker">Output</p>
@@ -990,16 +1104,16 @@
           <div class="ih-card">
             <div class="ih-item-top" style="margin-bottom:12px">
               <h3 class="ih-item-title">Text</h3>
-              <button class="ih-btn ih-btn-primary" type="button" data-action="copy-text">Copy text</button>
+              <button class="ih-btn ih-btn-primary" type="button" data-action="copy-text">${escapeHTML(instance.config.copyTextLabel)}</button>
             </div>
-            <pre class="ih-output">${escapeHTML(text)}</pre>
+            <pre class="ih-output" data-export-text>${escapeHTML(text)}</pre>
           </div>
           <div class="ih-card">
             <div class="ih-item-top" style="margin-bottom:12px">
               <h3 class="ih-item-title">JSON</h3>
-              <button class="ih-btn" type="button" data-action="copy-json">Copy JSON</button>
+              <button class="ih-btn" type="button" data-action="copy-json">${escapeHTML(instance.config.copyJsonLabel)}</button>
             </div>
-            <pre class="ih-output">${escapeHTML(json)}</pre>
+            <pre class="ih-output" data-export-json>${escapeHTML(json)}</pre>
           </div>
         </div>
       </section>
@@ -1026,9 +1140,20 @@
       `;
     }
     if (value.view === "code") {
-      return `<pre class="ih-code"><code>${escapeHTML(valueToText(value.value))}</code></pre>`;
+      return renderCodeViewer(value);
     }
     return `<p>${escapeHTML(valueToText(value))}</p>`;
+  }
+
+  function renderCodeViewer(value) {
+    const codeText = valueToText(value.value);
+    const lang = value.lang || value.language || "";
+    return `
+      <div class="ih-code-viewer" data-code-viewer-shell>
+        <pre class="ih-code-viewer-fallback"><code>${escapeHTML(codeText)}</code></pre>
+        <div class="ih-code-viewer-host" data-code-viewer data-lang="${escapeAttr(lang)}" aria-label="Code preview"></div>
+      </div>
+    `;
   }
 
   function renderList(items) {
@@ -1043,8 +1168,80 @@
     return `<div class="ih-meta">${values.map((entry) => `<span class="ih-pill">${escapeHTML(valueToText(entry))}</span>`).join("")}</div>`;
   }
 
-  function renderChip(entry) {
-    return `<div class="ih-chip">${escapeHTML(entry.title)}</div>`;
+  function renderVerdictPill(questionDef, answer, entry) {
+    const selected = answer.verdicts && answer.verdicts[entry.id] || defaultReviewVerdict(questionDef);
+    return `
+      <div class="ih-verdict-pill" role="radiogroup" aria-label="Verdict for ${escapeAttr(entry.title)}">
+        ${questionDef.verbs.map((verb, index) => {
+          const isSelected = selected === verb.id;
+          return `<button class="ih-verb ${isSelected ? "is-selected" : ""}" style="--ih-verdict-color:${verdictColor(index)}" type="button" data-action="review-verdict" data-item-id="${escapeAttr(entry.id)}" data-verdict="${escapeAttr(verb.id)}" aria-label="${escapeAttr(verb.title)}" title="${escapeAttr(verb.title)}">${isSelected ? escapeHTML(verb.title) : ""}</button>`;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderAddedPill() {
+    return `<span class="ih-added-pill">added</span>`;
+  }
+
+  function renderCommentButton(kind, itemId, value, label) {
+    const filled = Boolean(String(value || "").trim());
+    const itemAttr = itemId ? ` data-item-id="${escapeAttr(itemId)}"` : "";
+    return `<button class="ih-comment-button ${filled ? "has-comment" : ""}" type="button" data-action="open-comment" data-comment-kind="${escapeAttr(kind)}"${itemAttr} aria-label="${escapeAttr(label || "Comment")}" title="${escapeAttr(label || "Comment")}">${commentIcon()}</button>`;
+  }
+
+  function renderCommentPopover(instance) {
+    const editor = instance.state.commentEditor;
+    if (!editor) return "";
+    const context = instance.contextByQuestionId(editor.questionId);
+    if (!context) return "";
+    const value = getCommentValue(context.answer, editor.kind, editor.itemId);
+    return `
+      <div class="ih-comment-popover-backdrop" data-action="close-comment">
+        <section class="ih-comment-popover" role="dialog" aria-modal="true" aria-label="Comment editor" data-action="keep-comment-open">
+          <div class="ih-comment-head">
+            <h3>Comment</h3>
+            <button class="ih-btn" type="button" data-action="close-comment">Done</button>
+          </div>
+          <textarea class="ih-field ih-auto-field" data-input="comment-modal" placeholder="Write a note for the next agent...">${escapeHTML(value)}</textarea>
+        </section>
+      </div>
+    `;
+  }
+
+  function commentIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>`;
+  }
+
+  function trashIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`;
+  }
+
+  function getCommentValue(answer, kind, itemId) {
+    if (!answer) return "";
+    if (kind === "redline-summary") return answer.summary || "";
+    return answer.comments && answer.comments[itemId] || "";
+  }
+
+  function setCommentValue(answer, kind, itemId, value) {
+    const textValue = String(value || "");
+    if (kind === "redline-summary") {
+      answer.summary = textValue;
+      return;
+    }
+    if (!answer.comments) answer.comments = {};
+    if (textValue.trim()) answer.comments[itemId] = textValue;
+    else delete answer.comments[itemId];
+  }
+
+  function verdictColor(index) {
+    const colors = ["#0d7d48", "#2457ff", "#a73535", "#9a5d00", "#6d4bb4", "#16728a"];
+    return colors[index % colors.length];
+  }
+
+  function defaultReviewVerdict(questionDef) {
+    const unsure = asArray(questionDef.verbs).find((entry) => /unsure/i.test(entry.id) || /unsure/i.test(entry.title));
+    return unsure ? unsure.id : (questionDef.verbs[questionDef.verbs.length - 1] && questionDef.verbs[questionDef.verbs.length - 1].id) || "";
   }
 
   // App runtime --------------------------------------------------------------
@@ -1054,7 +1251,12 @@
       this.config = config;
       this.root = resolveTarget(config.target);
       this.state = createInitialState(config.questions);
-      this.draggedItemId = "";
+      this.state.viewMode = config.pageMode === "auto" ? (config.questions.length <= 3 ? "all" : "paged") : config.pageMode;
+      this.saveTimer = null;
+      this.chromeFrame = null;
+      this.sortables = [];
+      this.codeEditors = [];
+      this.exportTimer = null;
       this.toastTimer = null;
       this.load();
       this.mount();
@@ -1067,13 +1269,30 @@
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
       this.root.addEventListener("keydown", (event) => this.onKeydown(event));
-      this.root.addEventListener("dragstart", (event) => this.onDragStart(event));
-      this.root.addEventListener("dragover", (event) => this.onDragOver(event));
-      this.root.addEventListener("drop", (event) => this.onDrop(event));
     }
 
     render() {
+      this.destroyEnhancements();
       renderApp(this);
+      this.afterRender();
+    }
+
+    afterRender() {
+      requestAnimationFrame(() => {
+        this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
+        this.syncRankDom();
+        this.initSortables();
+        this.initCodeEditors();
+        const comment = this.root.querySelector("[data-input='comment-modal']");
+        if (comment) {
+          comment.focus();
+          autoGrowTextarea(comment);
+        }
+      });
+    }
+
+    viewMode() {
+      return this.state.viewMode === "all" ? "all" : "paged";
     }
 
     currentQuestion() {
@@ -1085,6 +1304,24 @@
       return questionDef && this.state.answers[questionDef.id];
     }
 
+    contextFromNode(node) {
+      const section = node && node.closest && node.closest(".ih-step[data-question-id]");
+      if (!section) return { questionDef: this.currentQuestion(), answer: this.currentAnswer(), index: this.state.step };
+      return this.contextByQuestionId(section.dataset.questionId);
+    }
+
+    contextByQuestionId(questionId) {
+      const index = this.config.questions.findIndex((entry) => entry.id === questionId);
+      if (index < 0) return null;
+      const questionDef = this.config.questions[index];
+      return { questionDef, answer: this.state.answers[questionDef.id], index };
+    }
+
+    activateContext(context) {
+      if (!context) return;
+      this.state.step = context.index;
+    }
+
     onClick(event) {
       const actionEl = event.target.closest("[data-action]");
       if (!actionEl || !this.root.contains(actionEl)) return;
@@ -1094,140 +1331,509 @@
       if (action === "back") return this.go(-1);
       if (action === "next") return this.go(1);
       if (action === "reset") return this.reset();
+      if (action === "toggle-mode") return this.toggleMode();
       if (action === "copy-text") return this.copyText();
       if (action === "copy-json") return this.copyJson();
-      if (action === "select-one") return this.selectOne(actionEl.dataset.itemId);
-      if (action === "toggle-many") return this.toggleMany(actionEl.dataset.itemId);
-      if (action === "rank-up") return this.moveRank(actionEl.closest("[data-item-id]").dataset.itemId, -1);
-      if (action === "rank-down") return this.moveRank(actionEl.closest("[data-item-id]").dataset.itemId, 1);
-      if (action === "review-verdict") return this.setReviewVerdict(actionEl.dataset.itemId, actionEl.dataset.verdict);
-      if (action === "add-item") return this.addItem();
-      if (action === "remove-added") return this.removeAdded(numberOr(actionEl.dataset.addedIndex, -1));
+      if (action === "jump") return this.jump(numberOr(actionEl.dataset.step, this.state.step));
+      if (action === "open-comment") return this.openComment(actionEl);
+      if (action === "close-comment") return this.closeComment();
+      if (action === "keep-comment-open") return;
+
+      const context = this.contextFromNode(actionEl);
+      this.activateContext(context);
+      if (action === "select-one") return this.selectOne(actionEl.dataset.itemId, context);
+      if (action === "toggle-many") return this.toggleMany(actionEl.dataset.itemId, context);
+      if (action === "review-verdict") return this.setReviewVerdict(actionEl.dataset.itemId, actionEl.dataset.verdict, context);
+      if (action === "add-item") return this.addItem(context);
+      if (action === "remove-added") return this.removeAdded(actionEl.dataset.itemId || numberOr(actionEl.dataset.addedIndex, -1), context);
     }
 
     onInput(event) {
       const input = event.target.closest("[data-input]");
       if (!input || !this.root.contains(input)) return;
       const kind = input.dataset.input;
-      const questionDef = this.currentQuestion();
-      const answer = this.currentAnswer();
+      if (kind === "add-text") {
+        autoGrowTextarea(input);
+        return;
+      }
+      const context = kind === "comment-modal" && this.state.commentEditor
+        ? this.contextByQuestionId(this.state.commentEditor.questionId)
+        : this.contextFromNode(input);
+      this.activateContext(context);
+      const questionDef = context && context.questionDef;
+      const answer = context && context.answer;
       if (!questionDef || !answer) return;
 
       if (kind === "text") answer.answer = input.value;
-      if (kind === "item-comment") answer.comments[input.dataset.itemId] = input.value;
-      if (kind === "rank-comment") answer.comment = input.value;
-      if (kind === "sort-comment") answer.comment = input.value;
-      if (kind === "sort-bucket") answer.buckets[input.dataset.itemId] = input.value;
+      if (kind === "comment-modal" && this.state.commentEditor) {
+        setCommentValue(answer, this.state.commentEditor.kind, this.state.commentEditor.itemId, input.value);
+        this.syncOpenCommentButton();
+      }
+      if (kind === "sort-bucket") this.setSortBucket(input.dataset.itemId, input.value, context);
       if (kind === "review-edit") answer.edits[input.dataset.itemId] = input.value;
-      if (kind === "allocate") answer.points[input.dataset.itemId] = clamp(numberOr(input.value, 0), 0, questionDef.total);
+      if (kind === "added-title") this.updateAddedTitle(input.dataset.itemId, input.value, context);
       if (kind === "redline-content") answer.content = input.value;
-      if (kind === "line-comment") answer.comments[input.dataset.line] = input.value;
-      if (kind === "redline-summary") answer.summary = input.value;
 
-      this.save();
-      if (["sort-bucket", "allocate", "redline-content"].includes(kind)) this.render();
+      answer.touched = true;
+      autoGrowTextarea(input);
+      const immediate = kind === "sort-bucket";
+      if (immediate) this.save();
+      else this.scheduleSave();
+      if (kind === "sort-bucket") this.syncSortDom(context);
+      if (immediate) this.refreshExport();
+      else this.scheduleExport();
+      this.scheduleChrome();
     }
 
     onKeydown(event) {
+      if (event.key === "Escape") {
+        if (this.state.commentEditor) this.closeComment();
+      }
       const choice = event.target.closest(".ih-choice[data-action]");
+      if (choice && isFormControl(event.target)) return;
       if (!choice || !["Enter", " "].includes(event.key)) return;
       event.preventDefault();
       choice.click();
     }
 
-    onDragStart(event) {
-      const card = event.target.closest(".ih-rank-item[data-item-id]");
-      if (!card) return;
-      this.draggedItemId = card.dataset.itemId;
-      event.dataTransfer.effectAllowed = "move";
+    sectionForContext(context) {
+      if (!context) return null;
+      return this.root.querySelector(`.ih-step[data-question-id="${cssEscape(context.questionDef.id)}"]`);
     }
 
-    onDragOver(event) {
-      if (!this.draggedItemId || !event.target.closest(".ih-rank-item[data-item-id]")) return;
-      event.preventDefault();
+    scheduleSave() {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => {
+        this.saveTimer = null;
+        this.save();
+      }, 180);
     }
 
-    onDrop(event) {
-      const card = event.target.closest(".ih-rank-item[data-item-id]");
-      if (!card || !this.draggedItemId) return;
-      event.preventDefault();
-      this.moveRankTo(this.draggedItemId, card.dataset.itemId);
-      this.draggedItemId = "";
+    scheduleChrome() {
+      if (this.chromeFrame) return;
+      this.chromeFrame = requestAnimationFrame(() => {
+        this.chromeFrame = null;
+        this.refreshChrome();
+        this.syncOpenCommentButton();
+      });
     }
 
-    selectOne(itemId) {
-      this.currentAnswer().selected = itemId;
-      this.save();
-      this.render();
+    scheduleExport() {
+      clearTimeout(this.exportTimer);
+      this.exportTimer = setTimeout(() => {
+        this.exportTimer = null;
+        this.refreshExport();
+      }, 180);
     }
 
-    toggleMany(itemId) {
-      const answer = this.currentAnswer();
-      const selected = new Set(asArray(answer.selected));
-      if (selected.has(itemId)) selected.delete(itemId);
-      else selected.add(itemId);
-      answer.selected = Array.from(selected);
-      this.save();
-      this.render();
+    refreshExport() {
+      const textOutput = this.root.querySelector("[data-export-text]");
+      const jsonOutput = this.root.querySelector("[data-export-json]");
+      if (textOutput) textOutput.textContent = this.getText();
+      if (jsonOutput) jsonOutput.textContent = this.getJSON();
     }
 
-    moveRank(itemId, direction) {
-      const answer = this.currentAnswer();
-      const order = asArray(answer.order);
-      const index = order.indexOf(itemId);
-      const nextIndex = clamp(index + direction, 0, order.length - 1);
-      if (index < 0 || index === nextIndex) return;
-      order.splice(index, 1);
-      order.splice(nextIndex, 0, itemId);
-      answer.order = order;
-      this.save();
-      this.render();
-    }
-
-    moveRankTo(itemId, targetId) {
-      const answer = this.currentAnswer();
-      const order = asArray(answer.order).filter((id) => id !== itemId);
-      const targetIndex = order.indexOf(targetId);
-      order.splice(targetIndex >= 0 ? targetIndex : order.length, 0, itemId);
-      answer.order = order;
-      this.save();
-      this.render();
-    }
-
-    setReviewVerdict(itemId, verdict) {
-      this.currentAnswer().verdicts[itemId] = verdict;
-      this.save();
-      this.render();
-    }
-
-    addItem() {
-      const input = this.root.querySelector("[data-input='add-text']");
-      const title = input && input.value.trim();
-      if (!title) return this.toast("Write the item first.");
-      this.currentAnswer().added.push({ id: slugify(title) || `added-${Date.now()}`, title });
-      this.save();
-      this.render();
-    }
-
-    removeAdded(index) {
-      if (index < 0) return;
-      this.currentAnswer().added.splice(index, 1);
-      this.save();
-      this.render();
-    }
-
-    go(direction) {
-      const max = this.config.questions.length;
-      this.state.step = clamp(this.state.step + direction, 0, max);
+    toggleMode() {
+      this.state.viewMode = this.viewMode() === "all" ? "paged" : "all";
+      this.state.commentEditor = null;
       this.save();
       this.render();
       global.scrollTo({ top: 0, behavior: "smooth" });
     }
 
+    openComment(button) {
+      const context = this.contextFromNode(button);
+      if (!context) return;
+      this.activateContext(context);
+      this.state.commentEditor = {
+        questionId: context.questionDef.id,
+        kind: button.dataset.commentKind || "item-comment",
+        itemId: button.dataset.itemId || ""
+      };
+      this.save();
+      this.render();
+    }
+
+    closeComment() {
+      this.state.commentEditor = null;
+      this.save();
+      this.render();
+    }
+
+    syncOpenCommentButton() {
+      const editor = this.state.commentEditor;
+      if (!editor) return;
+      const context = this.contextByQuestionId(editor.questionId);
+      const section = this.sectionForContext(context);
+      if (!context || !section) return;
+      section.querySelectorAll("[data-action='open-comment']").forEach((button) => {
+        const value = getCommentValue(context.answer, button.dataset.commentKind, button.dataset.itemId || "");
+        button.classList.toggle("has-comment", Boolean(String(value || "").trim()));
+      });
+    }
+
+    destroyEnhancements() {
+      this.sortables.forEach((sortable) => {
+        try { sortable.destroy(); } catch (_) {}
+      });
+      this.sortables = [];
+      this.codeEditors.forEach((view) => {
+        try { view.destroy(); } catch (_) {}
+      });
+      this.codeEditors = [];
+    }
+
+    initSortables() {
+      const lists = Array.from(this.root.querySelectorAll("[data-sortable-rank], [data-sortable-sort]"));
+      if (!lists.length) return;
+      ensureSortable().then((Sortable) => {
+        lists.forEach((list) => {
+          if (!list.isConnected) return;
+          const context = this.contextFromNode(list);
+          if (!context) return;
+          const common = {
+            animation: 150,
+            ghostClass: "is-dragging",
+            handle: ".ih-grip",
+            filter: "textarea, input, select, .ih-comment-button, .ih-remove-icon",
+            preventOnFilter: false
+          };
+          if (list.matches("[data-sortable-rank]") && context.questionDef.type === "rank") {
+            const sortable = new Sortable(list, Object.assign({}, common, {
+              draggable: ".ih-rank-item",
+              onEnd: () => this.updateRankFromDom(list, context)
+            }));
+            list.dataset.sortableReady = "true";
+            this.sortables.push(sortable);
+          }
+          if (list.matches("[data-sortable-sort]") && context.questionDef.type === "sort") {
+            const sortable = new Sortable(list, Object.assign({}, common, {
+              group: `ih-sort-${context.questionDef.id}`,
+              draggable: ".ih-sort-card",
+              onStart: () => list.querySelectorAll(".ih-bucket-empty").forEach((empty) => empty.remove()),
+              onEnd: () => this.updateSortFromDom(context)
+            }));
+            list.dataset.sortableReady = "true";
+            this.sortables.push(sortable);
+          }
+        });
+      }).catch(() => {});
+    }
+
+    initCodeEditors() {
+      const hosts = Array.from(this.root.querySelectorAll("[data-code-editor]"));
+      hosts.forEach((host) => {
+        const context = this.contextFromNode(host);
+        if (!context || context.questionDef.type !== "redline") return;
+        const card = host.closest("[data-redline]");
+        const fallback = card && card.querySelector("[data-input='redline-content']");
+        const loading = card && card.querySelector("[data-editor-loading]");
+        loadCodeMirror(host.dataset.lang || "").then(({ EditorView, basicSetup, theme, language }) => {
+          if (!host.isConnected) return;
+          const doc = fallback ? fallback.value : context.answer.content || "";
+          context.answer.content = doc;
+          const extensions = [
+            basicSetup,
+            theme,
+            language,
+            EditorView.lineWrapping,
+            EditorView.updateListener.of((update) => {
+              if (!update.docChanged) return;
+              context.answer.content = update.state.doc.toString();
+              context.answer.touched = true;
+              this.scheduleSave();
+              this.scheduleExport();
+              this.scheduleChrome();
+            })
+          ].filter(Boolean);
+          host.textContent = "";
+          host.classList.add("is-ready");
+          if (card) card.classList.add("has-editor");
+          if (loading) loading.remove();
+          const view = new EditorView({
+            doc,
+            extensions,
+            parent: host
+          });
+          this.codeEditors.push(view);
+          if (fallback) fallback.value = doc;
+        }).catch(() => {
+          if (card) card.classList.add("is-fallback");
+          if (host) host.hidden = true;
+          if (loading) loading.textContent = "Syntax editor unavailable; using the plain editor.";
+          if (fallback) autoGrowTextarea(fallback);
+        });
+      });
+
+      const viewerHosts = Array.from(this.root.querySelectorAll("[data-code-viewer]"));
+      viewerHosts.forEach((host) => {
+        const shell = host.closest("[data-code-viewer-shell]");
+        const fallback = shell && shell.querySelector(".ih-code-viewer-fallback");
+        const doc = fallback ? fallback.textContent || "" : "";
+        loadCodeMirror(host.dataset.lang || "").then(({ EditorView, basicSetup, theme, language }) => {
+          if (!host.isConnected || !shell) return;
+          const extensions = [
+            basicSetup,
+            theme,
+            language,
+            EditorView.lineWrapping,
+            EditorView.editable.of(false)
+          ].filter(Boolean);
+          host.textContent = "";
+          const view = new EditorView({ doc, extensions, parent: host });
+          shell.classList.add("has-editor");
+          this.codeEditors.push(view);
+        }).catch(() => {});
+      });
+    }
+
+    updateRankFromDom(list, context) {
+      if (!context || context.questionDef.type !== "rank") return;
+      context.answer.order = Array.from(list.querySelectorAll(".ih-rank-item[data-item-id]")).map((card) => card.dataset.itemId);
+      context.answer.touched = true;
+      this.activateContext(context);
+      this.save();
+      this.syncRankDom(context);
+      this.refreshChrome();
+      this.refreshExport();
+    }
+
+    updateSortFromDom(context) {
+      const section = this.sectionForContext(context);
+      if (!context || context.questionDef.type !== "sort" || !section) return;
+      context.questionDef.items.forEach((entry) => { context.answer.buckets[entry.id] = ""; });
+      section.querySelectorAll(".ih-bucket-list[data-bucket-id]").forEach((list) => {
+        const bucketId = list.dataset.bucketId || "";
+        list.querySelectorAll(".ih-sort-card[data-item-id]").forEach((card) => {
+          context.answer.buckets[card.dataset.itemId] = bucketId;
+        });
+      });
+      context.answer.touched = true;
+      this.activateContext(context);
+      this.save();
+      this.syncSortDom(context);
+      this.refreshChrome();
+      this.refreshExport();
+    }
+
+    selectOne(itemId, context) {
+      const answer = context && context.answer;
+      if (!answer) return;
+      answer.selected = itemId;
+      answer.touched = true;
+      this.save();
+      this.refreshChoiceState(context);
+      this.refreshChrome();
+      this.refreshExport();
+    }
+
+    toggleMany(itemId, context) {
+      const answer = context && context.answer;
+      if (!answer) return;
+      const selected = new Set(asArray(answer.selected));
+      if (selected.has(itemId)) selected.delete(itemId);
+      else selected.add(itemId);
+      answer.selected = Array.from(selected);
+      answer.touched = true;
+      this.save();
+      this.refreshChoiceState(context);
+      this.refreshChrome();
+      this.refreshExport();
+    }
+
+    setReviewVerdict(itemId, verdict, context) {
+      const answer = context && context.answer;
+      if (!answer) return;
+      answer.verdicts[itemId] = verdict;
+      answer.touched = true;
+      this.save();
+      const row = this.sectionForContext(context) && this.sectionForContext(context).querySelector(`.ih-review-row[data-item-id="${cssEscape(itemId)}"]`);
+      if (row) {
+        row.querySelectorAll(".ih-verb").forEach((button) => {
+          const selected = button.dataset.verdict === verdict;
+          button.classList.toggle("is-selected", selected);
+          button.textContent = selected ? button.getAttribute("aria-label") : "";
+        });
+      }
+      this.refreshChrome();
+      this.refreshExport();
+    }
+
+    addItem(context) {
+      const section = this.sectionForContext(context);
+      const input = section && section.querySelector("[data-input='add-text']");
+      const title = input && input.value.trim();
+      if (!title) return this.toast("Write the item first.");
+      const questionDef = context && context.questionDef;
+      const answer = context && context.answer;
+      if (!questionDef || !answer) return;
+      const id = uniqueAddedId(questionDef, answer, title);
+      answer.added.push({ id, title });
+      if (questionDef.type === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
+      if (questionDef.type === "review") answer.edits[id] = title;
+      answer.touched = true;
+      this.save();
+      this.render();
+    }
+
+    removeAdded(idOrIndex, context) {
+      const answer = context && context.answer;
+      const questionDef = context && context.questionDef;
+      if (!answer || !questionDef) return;
+      const index = typeof idOrIndex === "string"
+        ? asArray(answer.added).findIndex((entry) => entry.id === idOrIndex)
+        : numberOr(idOrIndex, -1);
+      if (index < 0) return;
+      const removed = answer.added[index];
+      answer.added.splice(index, 1);
+      if (removed) {
+        if (questionDef.type === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
+        if (answer.comments) delete answer.comments[removed.id];
+        if (answer.edits) delete answer.edits[removed.id];
+        if (answer.verdicts) delete answer.verdicts[removed.id];
+      }
+      answer.touched = true;
+      this.save();
+      this.render();
+    }
+
+    updateAddedTitle(itemId, title, context) {
+      const answer = context && context.answer;
+      const entry = answer && asArray(answer.added).find((candidate) => candidate.id === itemId);
+      if (!entry) return;
+      entry.title = title;
+      if (answer.edits && answer.edits[itemId] !== undefined) answer.edits[itemId] = title;
+    }
+
+    setSortBucket(itemId, bucketId, context) {
+      const answer = context && context.answer;
+      if (!answer || !answer.buckets) return;
+      answer.buckets[itemId] = bucketId || "";
+      answer.touched = true;
+      this.save();
+      this.syncSortDom(context);
+      this.refreshChrome();
+      this.refreshExport();
+    }
+
+    go(direction) {
+      this.jump(this.state.step + direction);
+    }
+
+    jump(step) {
+      const max = this.config.questions.length;
+      this.state.step = clamp(step, 0, max);
+      this.save();
+      if (this.viewMode() === "all") {
+        this.refreshChrome();
+        const id = this.state.step >= this.config.questions.length ? "ih-output" : `ih-question-${this.state.step}`;
+        const section = this.root.querySelector(`#${cssEscape(id)}`);
+        if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      this.render();
+      global.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    refreshChoiceState(context) {
+      const questionDef = context && context.questionDef;
+      const answer = context && context.answer;
+      if (!questionDef || !["one", "many"].includes(questionDef.type)) return;
+      const section = this.sectionForContext(context);
+      if (!section) return;
+      const selected = questionDef.type === "many" ? asArray(answer.selected) : [answer.selected];
+      section.querySelectorAll(".ih-choice[data-item-id]").forEach((card) => {
+        const isSelected = selected.includes(card.dataset.itemId);
+        card.classList.toggle("is-selected", isSelected);
+        const dot = card.querySelector(".ih-select-dot");
+        if (dot) dot.textContent = isSelected ? "✓" : "+";
+      });
+    }
+
+    syncRankDom(context) {
+      if (!context) {
+        this.config.questions.forEach((questionDef) => {
+          if (questionDef.type === "rank") this.syncRankDom(this.contextByQuestionId(questionDef.id));
+        });
+        return;
+      }
+      const questionDef = context.questionDef;
+      const answer = context.answer;
+      if (!questionDef || questionDef.type !== "rank") return;
+      const section = this.sectionForContext(context);
+      const list = section && section.querySelector(".ih-rank-list");
+      if (!list) return;
+      const order = asArray(answer.order);
+      order.forEach((id) => {
+        const card = list.querySelector(`.ih-rank-item[data-item-id="${cssEscape(id)}"]`);
+        if (card) list.appendChild(card);
+      });
+      list.querySelectorAll(".ih-rank-item").forEach((card, index) => {
+        const number = card.querySelector(".ih-rank-num");
+        if (number) number.textContent = String(index + 1);
+      });
+    }
+
+    syncSortDom(context) {
+      if (!context) {
+        this.config.questions.forEach((questionDef) => {
+          if (questionDef.type === "sort") this.syncSortDom(this.contextByQuestionId(questionDef.id));
+        });
+        return;
+      }
+      const questionDef = context.questionDef;
+      const answer = context.answer;
+      if (!questionDef || questionDef.type !== "sort") return;
+      const section = this.sectionForContext(context);
+      if (!section) return;
+      section.querySelectorAll(".ih-sort-card[data-item-id]").forEach((card) => {
+        const bucketId = answer.buckets && answer.buckets[card.dataset.itemId] || "";
+        const bucket = section.querySelector(`.ih-bucket[data-bucket-id="${cssEscape(bucketId)}"] .ih-bucket-list`);
+        if (bucket && card.parentElement !== bucket) bucket.appendChild(card);
+        const select = card.querySelector("[data-input='sort-bucket']");
+        if (select) select.value = bucketId;
+      });
+      section.querySelectorAll(".ih-bucket").forEach((bucket) => {
+        const list = bucket.querySelector(".ih-bucket-list");
+        if (!list) return;
+        list.querySelectorAll(".ih-bucket-empty").forEach((empty) => empty.remove());
+        if (!list.querySelector(".ih-sort-card")) {
+          const empty = document.createElement("div");
+          empty.className = "ih-bucket-empty";
+          empty.textContent = bucket.dataset.bucketId ? "Drop items here" : "Everything is classified";
+          list.appendChild(empty);
+        }
+      });
+    }
+
+    refreshChrome() {
+      this.root.querySelectorAll(".ih-timeline-dot[data-step]").forEach((dot) => {
+        const step = numberOr(dot.dataset.step, 0);
+        dot.className = step >= this.config.questions.length
+          ? [
+              "ih-timeline-dot",
+              "is-export",
+              this.state.step >= this.config.questions.length ? "is-active" : "",
+              isInterviewReady(this) ? "is-ready" : "is-waiting"
+            ].filter(Boolean).join(" ")
+          : `ih-timeline-dot ${timelineState(this, this.config.questions[step], step)}`;
+      });
+      const textOutput = this.root.querySelector("[data-export-text]");
+      const jsonOutput = this.root.querySelector("[data-export-json]");
+      if (textOutput) textOutput.textContent = this.getText();
+      if (jsonOutput) jsonOutput.textContent = this.getJSON();
+    }
+
     reset() {
       if (!global.confirm("Reset this interview and clear saved answers?")) return;
+      const viewMode = this.state.viewMode;
       this.state = createInitialState(this.config.questions);
-      if (this.config.storageKey) localStorage.removeItem(this.config.storageKey);
+      this.state.viewMode = viewMode;
+      if (this.config.storageKey) {
+        try {
+          localStorage.removeItem(this.config.storageKey);
+        } catch (_) {}
+      }
       this.render();
     }
 
@@ -1241,7 +1847,9 @@
 
     save() {
       if (!this.config.storageKey) return;
-      localStorage.setItem(this.config.storageKey, JSON.stringify(this.state));
+      try {
+        localStorage.setItem(this.config.storageKey, JSON.stringify(this.state));
+      } catch (_) {}
     }
 
     getResult() {
@@ -1277,6 +1885,78 @@
   }
 
   // Utilities ----------------------------------------------------------------
+
+  function ensureSortable() {
+    if (global.Sortable) return Promise.resolve(global.Sortable);
+    if (sortablePromise) return sortablePromise;
+    sortablePromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = SORTABLE_URL;
+      script.async = true;
+      script.onload = () => {
+        if (global.Sortable) resolve(global.Sortable);
+        else reject(new Error("SortableJS did not attach to window."));
+      };
+      script.onerror = () => reject(new Error("SortableJS failed to load."));
+      document.head.appendChild(script);
+    });
+    return sortablePromise;
+  }
+
+  async function loadCodeMirror(lang) {
+    if (!codeMirrorPromise) codeMirrorPromise = import(CODEMIRROR_URL);
+    if (!codeMirrorThemePromise) codeMirrorThemePromise = import(CODEMIRROR_THEME_URL);
+    const codeMirror = await codeMirrorPromise;
+    let theme = null;
+    try {
+      const themeModule = await codeMirrorThemePromise;
+      theme = themeModule.oneDark || null;
+    } catch (_) {
+      theme = null;
+    }
+    const rawKey = normalizeLanguageKey(lang, true);
+    const key = normalizeLanguageKey(lang);
+    const url = CODEMIRROR_LANGS[key];
+    let language = null;
+    if (url) {
+      try {
+        if (!codeMirrorLanguagePromises[url]) codeMirrorLanguagePromises[url] = import(url);
+        const module = await codeMirrorLanguagePromises[url];
+        language = codeMirrorLanguageExtension(key, rawKey, module);
+      } catch (_) {
+        language = null;
+      }
+    }
+    return { EditorView: codeMirror.EditorView, basicSetup: codeMirror.basicSetup, theme, language };
+  }
+
+  function normalizeLanguageKey(lang, preserveVariant) {
+    const key = String(lang || "")
+      .toLowerCase()
+      .replace(/^text\//, "")
+      .replace(/^application\//, "")
+      .replace(/^x-/, "")
+      .trim();
+    if (preserveVariant) return key;
+    if (["js", "mjs", "cjs", "javascript", "jsx", "ts", "typescript", "tsx"].includes(key)) return "javascript";
+    if (["md", "markdown", "mdx"].includes(key)) return "markdown";
+    if (["htm", "html"].includes(key)) return "html";
+    if (["json", "jsonc"].includes(key)) return "json";
+    return key;
+  }
+
+  function codeMirrorLanguageExtension(key, rawKey, module) {
+    if (key === "javascript" && module.javascript) {
+      return module.javascript({
+        jsx: rawKey === "jsx" || rawKey === "tsx",
+        typescript: rawKey === "ts" || rawKey === "typescript" || rawKey === "tsx"
+      });
+    }
+    if (key === "markdown" && module.markdown) return module.markdown();
+    if (key === "html" && module.html) return module.html();
+    if (key === "json" && module.json) return module.json();
+    return null;
+  }
 
   function mount(input, target) {
     return new InterviewHarnessApp(normalizeConfig(input, target));
@@ -1318,57 +1998,78 @@
     textarea.remove();
   }
 
-  function statusText(instance) {
-    if (instance.state.step >= instance.config.questions.length) return "Review and copy the text output, or use JSON for structured handoff.";
-    const questionDef = instance.currentQuestion();
-    return `${questionDef.type} question · ${instance.state.step + 1} of ${instance.config.questions.length}`;
-  }
-
   function nextLabel(instance) {
     if (instance.state.step >= instance.config.questions.length) return "Done";
     if (instance.state.step === instance.config.questions.length - 1) return "Review output";
     return "Next";
   }
 
-  function sideLabel(type) {
-    const labels = {
-      text: "Freeform answer",
-      one: "Single choice",
-      many: "Multiple choice",
-      rank: "Ordered preference",
-      allocate: "Priority budget",
-      sort: "Bucket sort",
-      review: "Review and edit",
-      redline: "Artifact redline"
-    };
-    return labels[type] || "Question";
+  function timelineState(instance, questionDef, index) {
+    const answer = instance.state.answers[questionDef.id];
+    return [
+      index === instance.state.step ? "is-active" : "",
+      isQuestionAnswered(questionDef, answer) ? "is-answered" : "is-unanswered"
+    ].filter(Boolean).join(" ");
   }
 
-  function sideText(type) {
-    const labels = {
-      text: "Use this for context, missing details, and open notes.",
-      one: "Pick one item. Comment on any option, including non-selected ones.",
-      many: "Pick all that apply. Add missing items when the choices are incomplete.",
-      rank: "Put the most important item first. Comments explain the ordering.",
-      allocate: "Distribute points to show intensity, not just preference.",
-      sort: "Classify items so requirements, preferences, and scope boundaries stay distinct.",
-      review: "Give each statement a verdict, edit it in place, and leave a note.",
-      redline: "Edit the artifact directly and attach comments to specific lines."
-    };
-    return labels[type] || "Answer in the form that best guides the next agent step.";
+  function isInterviewReady(instance) {
+    return instance.config.questions.every((questionDef) => {
+      return questionDef.optional || isQuestionAnswered(questionDef, instance.state.answers[questionDef.id]);
+    });
   }
 
-  function itemComments(questionDef, comments) {
-    return questionDef.items.map((entry) => ({
+  function isQuestionAnswered(questionDef, answer) {
+    if (!answer) return false;
+    if (questionDef.optional) return true;
+    if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
+    if (questionDef.type === "one") return Boolean(answer.selected);
+    if (questionDef.type === "many") return asArray(answer.selected).length > 0;
+    if (questionDef.type === "rank") return Boolean(answer.touched) && asArray(answer.order).length >= questionDef.items.length;
+    if (questionDef.type === "sort") {
+      return questionDef.items.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id]));
+    }
+    if (questionDef.type === "review") {
+      return answerItems(questionDef, answer).every((entry) => Boolean(answer.verdicts && answer.verdicts[entry.id]));
+    }
+    if (questionDef.type === "redline") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
+    return true;
+  }
+
+  function answerItems(questionDef, answer) {
+    const items = asArray(questionDef.items).map((entry) => Object.assign({ custom: false }, entry));
+    if (!answer || !answer.added) return items;
+    return items.concat(normalizeAddedItems(answer.added).map((entry) => Object.assign({ body: "", meta: null, custom: true }, entry)));
+  }
+
+  function itemComments(items, comments) {
+    return asArray(items).map((entry) => ({
       id: entry.id,
       title: entry.title,
       comment: comments && comments[entry.id] || ""
     })).filter((entry) => entry.comment);
   }
 
-  function findItem(questionDef, id) {
-    const entry = questionDef.items.find((candidate) => candidate.id === id);
+  function findItem(questionDef, answer, id) {
+    const entry = answerItems(questionDef, answer).find((candidate) => candidate.id === id);
     return entry ? { id: entry.id, title: entry.title } : null;
+  }
+
+  function normalizeAddedItems(input) {
+    return asArray(input).map((entry, index) => {
+      if (typeof entry === "string") return { id: slugify(entry) || `added-${index + 1}`, title: entry };
+      const raw = Object.assign({}, entry || {});
+      const title = String(raw.title || raw.label || raw.name || raw.value || `Added item ${index + 1}`);
+      return { id: String(raw.id || slugify(title) || `added-${index + 1}`), title };
+    });
+  }
+
+  function uniqueAddedId(questionDef, answer, title) {
+    const base = slugify(title) || `added-${Date.now()}`;
+    const used = new Set(answerItems(questionDef, answer).map((entry) => entry.id));
+    if (!used.has(base)) return base;
+    let index = 2;
+    while (used.has(`${base}-${index}`)) index += 1;
+    return `${base}-${index}`;
   }
 
   function artifactText(artifact) {
@@ -1393,6 +2094,10 @@
     return [value];
   }
 
+  function safeObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
   function numberOr(value, fallback) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
@@ -1403,7 +2108,19 @@
   }
 
   function isFormControl(node) {
-    return Boolean(node.closest("input, textarea, select, label"));
+    return Boolean(node.closest("input, textarea, select, label, button, summary, details"));
+  }
+
+  function autoGrowTextarea(node) {
+    if (!node || node.tagName !== "TEXTAREA") return;
+    if (!node.classList.contains("ih-auto-field")) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.max(node.scrollHeight, 46)}px`;
+  }
+
+  function cssEscape(value) {
+    if (global.CSS && typeof global.CSS.escape === "function") return global.CSS.escape(String(value));
+    return String(value).replace(/["\\]/g, "\\$&");
   }
 
   function slugify(value) {
@@ -1450,7 +2167,6 @@
     one,
     many,
     rank,
-    allocate,
     sort,
     review,
     redline,
