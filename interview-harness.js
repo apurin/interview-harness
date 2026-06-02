@@ -841,6 +841,10 @@
   function renderApp(instance) {
     const viewMode = instance.viewMode();
     const isExport = instance.state.step >= instance.config.questions.length;
+    const canToggleMode = instance.config.questions.length > 1;
+    const modeToggle = canToggleMode
+      ? `<button class="ih-btn ih-mode-toggle" type="button" data-action="toggle-mode">${viewMode === "all" ? "One per page" : "All questions"}</button>`
+      : "";
     const stepHtml = viewMode === "all"
       ? renderAllQuestions(instance)
       : isExport ? renderExportStep(instance) : renderQuestionStep(instance, instance.config.questions[instance.state.step], instance.state.step);
@@ -857,7 +861,7 @@
               </div>
             </div>
             <div class="ih-actions">
-              <button class="ih-btn ih-mode-toggle" type="button" data-action="toggle-mode">${viewMode === "all" ? "One per page" : "All questions"}</button>
+              ${modeToggle}
               <button class="ih-btn" type="button" data-action="reset">Reset</button>
             </div>
           </div>
@@ -1415,6 +1419,7 @@
     }
 
     toggleMode() {
+      if (this.config.questions.length <= 1) return;
       this.state.viewMode = this.viewMode() === "all" ? "paged" : "all";
       this.state.commentEditor = null;
       this.save();
