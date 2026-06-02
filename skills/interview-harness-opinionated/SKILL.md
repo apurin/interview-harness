@@ -4,6 +4,7 @@ description: Create rich interactive interviews for users as local standalone HT
 ---
 
 Create one standalone HTML file that the user can open directly in a browser. Reuse this file shape and replace the sample questions with the task-specific interview.
+Do not read the `interview-harness.js` to avoid wasting context - everything you need to use it is here.
 
 ```html
 <!doctype html>
