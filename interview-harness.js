@@ -554,9 +554,9 @@
     html:has(.ih-app), body:has(.ih-app) { background: var(--ih-bg); }
     body:has(.ih-app) { margin: 0; }
     .ih-app { min-height: 100vh; background: var(--ih-bg); color: var(--ih-ink); }
-    .ih-app button, .ih-app input, .ih-app textarea, .ih-app select { font: inherit; }
-    .ih-app button { cursor: pointer; color: inherit; }
-    .ih-app button:focus-visible, .ih-app input:focus-visible, .ih-app textarea:focus-visible, .ih-app select:focus-visible, .cm-editor.cm-focused {
+    .ih-app button, .ih-app input, .ih-app textarea, .ih-app select, .ih-app summary { font: inherit; }
+    .ih-app button, .ih-app summary { cursor: pointer; color: inherit; }
+    .ih-app button:focus-visible, .ih-app input:focus-visible, .ih-app textarea:focus-visible, .ih-app select:focus-visible, .ih-app summary:focus-visible, .cm-editor.cm-focused {
       outline: 3px solid var(--ih-accent-soft);
       outline-offset: 2px;
     }
@@ -678,7 +678,7 @@
     .ih-item-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
     .ih-item-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .ih-item-title { margin: 0; font-size: clamp(16px, 1.25vw, 20px); line-height: 1.18; letter-spacing: 0; }
-    .ih-select-dot, .ih-icon-btn, .ih-comment-button, .ih-remove-icon {
+    .ih-select-dot, .ih-icon-btn, .ih-comment-button, .ih-move-button, .ih-remove-icon {
       width: 32px;
       height: 32px;
       flex: 0 0 auto;
@@ -692,10 +692,46 @@
       padding: 0;
     }
     .ih-choice.is-selected .ih-select-dot { color: var(--ih-accent-ink); background: var(--ih-accent); }
-    .ih-comment-button svg, .ih-remove-icon svg { width: 16px; height: 16px; }
+    .ih-comment-button svg, .ih-move-button svg, .ih-remove-icon svg { width: 16px; height: 16px; }
     .ih-comment-button { border-color: transparent; background: color-mix(in srgb, var(--ih-accent) 14%, var(--ih-surface-2)); color: var(--ih-accent); }
     .ih-comment-button:hover { background: color-mix(in srgb, var(--ih-accent) 22%, var(--ih-surface-2)); color: var(--ih-accent); }
     .ih-comment-button.has-comment { color: var(--ih-accent-ink); border-color: transparent; background: var(--ih-accent); }
+    .ih-move-menu { display: inline-grid; }
+    .ih-move-menu[open] { z-index: 70; }
+    .ih-move-button { list-style: none; border-color: transparent; background: color-mix(in srgb, var(--ih-ink) 7%, var(--ih-surface-2)); color: var(--ih-muted); }
+    .ih-move-button::-webkit-details-marker { display: none; }
+    .ih-move-button::marker { content: ""; }
+    .ih-move-button:hover, .ih-move-menu[open] .ih-move-button { background: color-mix(in srgb, var(--ih-accent) 18%, var(--ih-surface-2)); color: var(--ih-accent); }
+    .ih-move-dropdown {
+      position: fixed;
+      top: var(--ih-move-top, 8px);
+      left: var(--ih-move-left, 8px);
+      z-index: 70;
+      min-width: 178px;
+      max-width: min(230px, calc(100vw - 16px));
+      max-height: min(260px, var(--ih-move-max-height, calc(100vh - 16px)));
+      overflow: auto;
+      display: grid;
+      gap: 2px;
+      border: 0;
+      border-radius: var(--ih-radius);
+      background: var(--ih-surface);
+      box-shadow: var(--ih-shadow);
+      padding: 6px;
+    }
+    .ih-move-option {
+      width: 100%;
+      border: 0;
+      border-radius: var(--ih-radius);
+      background: transparent;
+      color: var(--ih-ink);
+      padding: 8px 9px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 760;
+      line-height: 1.2;
+    }
+    .ih-move-option:hover, .ih-move-option.is-current { background: var(--ih-surface-2); }
     .ih-remove-icon { color: var(--ih-danger); }
     .ih-meta { display: flex; flex-wrap: wrap; gap: 6px; }
     .ih-pill { border: 0; border-radius: 999px; padding: 4px 8px; color: var(--ih-muted); background: var(--ih-surface-2); font-size: 12px; font-weight: 700; }
@@ -750,9 +786,9 @@
     }
     .ih-rank-item .ih-item-title, .ih-sort-card .ih-item-title { font-size: 14px; line-height: 1.25; }
     .ih-rank-item .ih-rich, .ih-sort-card .ih-rich { font-size: 12px; line-height: 1.35; }
-    .ih-sort-card > .ih-item-title { grid-column: 2; grid-row: 1; }
+    .ih-sort-card > .ih-item-title { grid-column: 2; grid-row: 1; align-self: center; }
     .ih-rank-item > .ih-item-title { grid-column: 2; grid-row: 1; }
-    .ih-sort-card > .ih-comment-button { grid-column: 3; grid-row: 1; justify-self: end; }
+    .ih-sort-card > .ih-sort-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
     .ih-rank-item > .ih-comment-button { grid-column: 3; grid-row: 1; justify-self: end; }
     .ih-rank-item > .ih-rich, .ih-sort-card > .ih-rich { grid-column: 1 / -1; grid-row: 2; }
     .ih-rank-item.is-dragging, .ih-sort-card.is-dragging { opacity: .55; }
@@ -1048,13 +1084,32 @@
   }
 
   function renderSortCard(questionDef, answer, entry) {
+    const currentBucketId = answer.buckets && answer.buckets[entry.id] || "";
     return `
       <article class="ih-sort-card" data-item-id="${escapeAttr(entry.id)}">
         <button class="ih-grip" type="button" aria-label="Drag to bucket"></button>
         <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-        ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on sort item")}
+        <div class="ih-sort-actions">
+          ${renderMoveMenu(questionDef, entry, currentBucketId)}
+          ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on sort item")}
+        </div>
         ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
       </article>
+    `;
+  }
+
+  function renderMoveMenu(questionDef, entry, currentBucketId) {
+    const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+    return `
+      <details class="ih-move-menu">
+        <summary class="ih-move-button" data-action="toggle-move-menu" aria-label="Move sort item" title="Move to column">${moveIcon()}</summary>
+        <div class="ih-move-dropdown" role="menu" aria-label="Move to column">
+          ${buckets.map((bucket) => {
+            const isCurrent = bucket.id === currentBucketId;
+            return `<button class="ih-move-option ${isCurrent ? "is-current" : ""}" type="button" role="menuitem" data-action="move-sort-item" data-item-id="${escapeAttr(entry.id)}" data-bucket-id="${escapeAttr(bucket.id)}" ${isCurrent ? `aria-current="true"` : ""}>${escapeHTML(bucket.title)}</button>`;
+          }).join("")}
+        </div>
+      </details>
     `;
   }
 
@@ -1222,6 +1277,10 @@
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>`;
   }
 
+  function moveIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="m7 8-4 4 4 4"/><path d="m17 8 4 4-4 4"/></svg>`;
+  }
+
   function trashIcon() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`;
   }
@@ -1268,6 +1327,11 @@
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
       this.root.addEventListener("keydown", (event) => this.onKeydown(event));
+      this.root.addEventListener("scroll", (event) => {
+        if (event.target.closest && event.target.closest(".ih-move-dropdown")) return;
+        this.closeMoveMenus();
+      }, true);
+      global.addEventListener("resize", () => this.closeMoveMenus());
     }
 
     render() {
@@ -1322,6 +1386,7 @@
     }
 
     onClick(event) {
+      if (!event.target.closest(".ih-move-menu")) this.closeMoveMenus();
       const actionEl = event.target.closest("[data-action]");
       if (!actionEl || !this.root.contains(actionEl)) return;
       const action = actionEl.dataset.action;
@@ -1337,12 +1402,17 @@
       if (action === "open-comment") return this.openComment(actionEl);
       if (action === "close-comment") return this.closeComment();
       if (action === "keep-comment-open") return;
+      if (action === "toggle-move-menu") {
+        event.preventDefault();
+        return this.toggleMoveMenu(actionEl);
+      }
 
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
       if (action === "select-one") return this.selectOne(actionEl.dataset.itemId, context);
       if (action === "toggle-many") return this.toggleMany(actionEl.dataset.itemId, context);
       if (action === "review-state") return this.setReviewState(actionEl.dataset.itemId, actionEl.dataset.reviewState, context);
+      if (action === "move-sort-item") return this.moveSortItem(actionEl, context);
       if (action === "add-item") return this.addItem(context);
       if (action === "remove-added") return this.removeAdded(actionEl.dataset.itemId || numberOr(actionEl.dataset.addedIndex, -1), context);
     }
@@ -1387,6 +1457,7 @@
     onKeydown(event) {
       if (event.key === "Escape") {
         if (this.state.commentEditor) this.closeComment();
+        else if (this.closeMoveMenus()) event.preventDefault();
       }
       const choice = event.target.closest(".ih-choice[data-action]");
       if (choice && isFormControl(event.target)) return;
@@ -1495,7 +1566,7 @@
             animation: 150,
             ghostClass: "is-dragging",
             handle: ".ih-grip",
-            filter: "textarea, input, select, .ih-comment-button, .ih-remove-icon",
+            filter: "textarea, input, select, .ih-comment-button, .ih-move-menu, .ih-remove-icon",
             preventOnFilter: false
           };
           if (list.matches("[data-sortable-rank]") && context.questionDef.type === "rank") {
@@ -1716,6 +1787,54 @@
       this.refreshExport();
     }
 
+    moveSortItem(button, context) {
+      const menu = button.closest(".ih-move-menu");
+      if (menu) menu.open = false;
+      this.setSortBucket(button.dataset.itemId, button.dataset.bucketId || "", context);
+    }
+
+    toggleMoveMenu(button) {
+      const menu = button.closest(".ih-move-menu");
+      if (!menu) return;
+      const shouldOpen = !menu.open;
+      this.closeMoveMenus();
+      if (!shouldOpen) return;
+      const context = this.contextFromNode(button);
+      this.activateContext(context);
+      menu.open = true;
+      this.positionMoveMenu(menu);
+    }
+
+    positionMoveMenu(menu) {
+      const button = menu.querySelector(".ih-move-button");
+      const dropdown = menu.querySelector(".ih-move-dropdown");
+      if (!button || !dropdown) return;
+      dropdown.style.visibility = "hidden";
+      const gap = 6;
+      const margin = 8;
+      const buttonRect = button.getBoundingClientRect();
+      const dropdownRect = dropdown.getBoundingClientRect();
+      const viewportWidth = global.innerWidth || document.documentElement.clientWidth;
+      const viewportHeight = global.innerHeight || document.documentElement.clientHeight;
+      const left = clamp(buttonRect.right - dropdownRect.width, margin, viewportWidth - dropdownRect.width - margin);
+      const top = clamp(buttonRect.bottom + gap, margin, viewportHeight - margin);
+      const maxHeight = Math.max(72, viewportHeight - top - margin);
+      menu.style.setProperty("--ih-move-left", `${Math.round(left)}px`);
+      menu.style.setProperty("--ih-move-top", `${Math.round(top)}px`);
+      menu.style.setProperty("--ih-move-max-height", `${Math.round(maxHeight)}px`);
+      dropdown.style.visibility = "";
+    }
+
+    closeMoveMenus(except) {
+      let closed = false;
+      this.root.querySelectorAll(".ih-move-menu[open]").forEach((menu) => {
+        if (menu === except) return;
+        menu.open = false;
+        closed = true;
+      });
+      return closed;
+    }
+
     go(direction) {
       this.jump(this.state.step + direction);
     }
@@ -1788,6 +1907,12 @@
         if (bucket && card.parentElement !== bucket) bucket.appendChild(card);
         const select = card.querySelector("[data-input='sort-bucket']");
         if (select) select.value = bucketId;
+        card.querySelectorAll("[data-action='move-sort-item']").forEach((button) => {
+          const selected = (button.dataset.bucketId || "") === bucketId;
+          button.classList.toggle("is-current", selected);
+          if (selected) button.setAttribute("aria-current", "true");
+          else button.removeAttribute("aria-current");
+        });
       });
       section.querySelectorAll(".ih-bucket").forEach((bucket) => {
         const list = bucket.querySelector(".ih-bucket-list");
