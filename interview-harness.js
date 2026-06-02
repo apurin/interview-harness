@@ -753,7 +753,13 @@
     .ih-rich { min-width: 0; color: var(--ih-muted); line-height: 1.45; display: grid; gap: 12px; align-content: start; }
     .ih-rich p { margin: 0; }
     .ih-rich ul { margin: 8px 0 0; }
-    .ih-frame { width: 100%; height: min(54vh, 520px); border: 0; border-radius: var(--ih-radius); background: var(--ih-surface-2); }
+    .ih-frame-shell { overflow: hidden; border-radius: var(--ih-radius); background: var(--ih-surface-2); }
+    .ih-frame-bar { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 4px 3px 9px; border-bottom: 1px solid var(--ih-line); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); }
+    .ih-frame-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ih-muted); font-size: 11px; font-weight: 760; line-height: 1.1; }
+    .ih-frame-open { flex: 0 0 auto; width: 24px; min-height: 22px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; padding: 0; background: var(--ih-surface); color: var(--ih-accent); text-decoration: none; font: inherit; line-height: 1; cursor: pointer; }
+    .ih-frame-open:hover { background: var(--ih-accent-soft); color: var(--ih-accent); }
+    .ih-frame-open svg { width: 14px; height: 14px; }
+    .ih-frame { display: block; width: 100%; height: min(54vh, 520px); border: 0; background: var(--ih-surface-2); }
     .ih-html-preview { overflow: auto; }
     .ih-html-preview > * + * { margin-top: 9px; }
     .ih-html-preview figure { margin: 0; display: grid; gap: 6px; }
@@ -1191,8 +1197,19 @@
     if (value.view === "frame") {
       const height = value.height ? ` style="height:${escapeAttr(value.height)}"` : "";
       const title = value.title || value.src || "Preview";
-      if (value.srcdoc) return `<iframe class="ih-frame" title="${escapeAttr(title)}" srcdoc="${escapeAttr(value.srcdoc)}"${height}></iframe>`;
-      return `<iframe class="ih-frame" title="${escapeAttr(title)}" src="${escapeAttr(value.src || "")}"${height}></iframe>`;
+      const sourceName = value.fileName || value.filename || frameSourceName(value.src) || title;
+      const openButton = value.src && !value.srcdoc
+        ? `<a class="ih-frame-open" href="${escapeAttr(value.src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>`
+        : "";
+      const bar = `
+        <div class="ih-frame-bar">
+          <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
+          ${openButton}
+        </div>`;
+      const iframe = value.srcdoc
+        ? `<iframe class="ih-frame" title="${escapeAttr(title)}" srcdoc="${escapeAttr(value.srcdoc)}"${height}></iframe>`
+        : `<iframe class="ih-frame" title="${escapeAttr(title)}" src="${escapeAttr(value.src || "")}"${height}></iframe>`;
+      return `<div class="ih-frame-shell">${bar}${iframe}</div>`;
     }
     if (value.view === "html") return `<div class="ih-html-preview">${value.markup || ""}</div>`;
     if (value.view === "prosCons") {
@@ -1279,6 +1296,10 @@
 
   function moveIcon() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="m7 8-4 4 4 4"/><path d="m17 8 4 4-4 4"/></svg>`;
+  }
+
+  function externalLinkIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
   }
 
   function trashIcon() {
@@ -1387,6 +1408,8 @@
 
     onClick(event) {
       if (!event.target.closest(".ih-move-menu")) this.closeMoveMenus();
+      const linkEl = event.target.closest("a[href]");
+      if (linkEl && this.root.contains(linkEl)) return;
       const actionEl = event.target.closest("[data-action]");
       if (!actionEl || !this.root.contains(actionEl)) return;
       const action = actionEl.dataset.action;
@@ -2217,6 +2240,18 @@
 
   function safeObject(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function frameSourceName(src) {
+    const source = String(src || "").trim();
+    if (!source) return "";
+    const clean = source.split("#")[0].split("?")[0].replace(/\/+$/, "");
+    const segment = clean.split(/[\\/]/).pop() || source;
+    try {
+      return decodeURIComponent(segment);
+    } catch (error) {
+      return segment;
+    }
   }
 
   function numberOr(value, fallback) {

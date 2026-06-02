@@ -61,7 +61,7 @@ Plain strings are valid items. Use `h.item(id, title, body, options)` when an op
 Rich body helpers:
 
 - `h.html(markup)`: trusted inline HTML.
-- `h.frame(src, options)`: iframe preview. Use `srcdoc` in options for inline frames.
+- `h.frame(src, options)`: iframe preview with a compact source-file header and a new-tab icon button. Use `srcdoc` in options for inline frames.
 - `h.prosCons(pros, cons)`: compact two-column pros and cons.
 - `h.code(lang, value)`: highlighted code. Redline questions use the same helper for editable artifacts.
 

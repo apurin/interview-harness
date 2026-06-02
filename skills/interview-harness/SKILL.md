@@ -97,7 +97,7 @@ Please call the restaurant if your party size changes.`))
 - Plain strings are valid items.
 - Use `h.item(id, title, body, options)` when an item needs rich context.
 - Use `h.html("<div>...</div>")` for short trusted HTML.
-- Use `h.frame(src, options)` for an iframe preview.
+- Use `h.frame(src, options)` for an iframe preview. Frames show a compact source-file header and a new-tab icon button.
 - Use `h.prosCons(pros, cons)` for compact tradeoffs.
 - Use `h.code(lang, value)` for code, prompt, or artifact text.
 - Rich bodies can be arrays.
