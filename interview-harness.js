@@ -542,6 +542,7 @@
       --ih-shadow: 0 18px 44px rgba(32, 36, 42, .12);
       --ih-radius: 8px;
       --ih-max: 1480px;
+      --ih-choice-column-width: 430px;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -641,7 +642,15 @@
     .ih-app .ih-btn-accent { background: var(--ih-accent); color: #fff; border-color: var(--ih-accent); }
     .ih-mode-toggle { min-width: 124px; }
 
-    .ih-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; align-items: start; }
+    .ih-grid {
+      column-width: var(--ih-choice-column-width);
+      column-gap: 14px;
+    }
+    .ih-grid > .ih-card {
+      width: 100%;
+      margin: 0 0 14px;
+      break-inside: avoid;
+    }
     .ih-stack { display: grid; gap: 10px; }
     .ih-card {
       border: 0;
