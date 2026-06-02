@@ -1,92 +1,120 @@
 ---
 name: interview-harness
-description: Create a local HTML interview artifact with the Interview Harness library. Use when an agent needs compact interactive questions and text or JSON export.
+description: Create rich interactive interviews for users as local standalone HTML files. A helper library takes care of layout, styling, interview state, and output. Allows cards with rich content, syntax highlighting, inline design and layout comparisons, iframe previews, and item comments.
 ---
 
-# Interview Harness
-
-Create a local HTML file. Let the library handle layout, state, navigation, comments, drag ordering, code editing, and exports.
-
-<!-- shared-start -->
-## Shared Usage
-
-- Write minimal standalone HTML that includes `interview-harness.js`.
-- Use the harness API for controls, layout, navigation, comments, persistence, and export.
-- Spend effort on question quality, item wording, and useful rich previews.
-- Keep intro text short. Put context in questions, help text, and item bodies.
-- Avoid custom CSS or bespoke layout unless the user explicitly asks for it.
-- Do not run a dev server, app scaffold, or browser layout test for an ordinary interview artifact.
-- Hand the user the local HTML file to open.
+Create one standalone HTML file that the user can open directly in a browser. Reuse this file shape and replace the sample questions with the task-specific interview.
 
 ```html
-<div id="interview-harness"></div>
-<script src="./interview-harness.js"></script>
-<script>
-  const h = InterviewHarness;
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Interview title</title>
+  </head>
+  <body>
+    <div id="interview-harness"></div>
+    <script src="file:///Users/apurin/Code/interview-harness/interview-harness.js"></script>
+    <script>
+      const h = InterviewHarness;
 
-  h.mount({
-    title: "Project direction interview",
-    intro: "Short context for the user.",
-    pageMode: "auto",
-    questions: [
-      h.text("context", "What should I keep in mind?"),
-      h.one("direction", "Which direction should I continue?", [
-        h.item("a", "A. Dense workspace", h.frame("mockups/a.html")),
-        h.item("b", "B. Guided setup", h.frame("mockups/b.html"))
-      ]),
-      h.many("features", "Which features matter?", [
-        "Fast export",
-        "Rich previews",
-        "Comment buttons"
-      ])
-    ]
-  });
-</script>
+      h.mount({
+        title: "Interview title",
+        intro: "Short context for the user.",
+        questions: [
+          // Freeform text input question.
+          h.text("constraint", "What restaurant constraint should I not break?", {
+            multiline: true,
+            placeholder: "Walk-ins, phone bookings, table turnover, large parties, deposits, accessibility."
+          }),
+
+          // Single-select question; rich choice cards are about 430px wide.
+          h.one("restaurant_type", "What kind of reservation flow is this?", [
+            h.item("small", "Small restaurant with a few tables", [
+              h.html("<div>Keep the flow simple: date, time, party size, contact info.</div>"),
+              h.prosCons(["Fast to build", "Low staff overhead"], ["Less control over edge cases"])
+            ]),
+            h.item("busy", "Busy restaurant with tight table turnover", [
+              h.html("<div>Show limited slots, party-size rules, and clear arrival expectations.</div>"),
+              h.prosCons(["Protects capacity", "Fewer bad bookings"], ["More rules to explain"])
+            ]),
+            h.item("events", "Restaurant with private events and large parties", [
+              h.html("<div>Route large groups to an inquiry instead of instant booking.</div>"),
+              h.prosCons(["Avoids impossible bookings", "Captures special requests"], ["Slower confirmation"])
+            ])
+          ]),
+
+          // Multi-select question with add-another support; rich choice cards are about 430px wide.
+          h.many("booking_details", "What should guests provide before confirming?", [
+            h.item("contact", "Name, phone, and email", h.html("<div>Needed for confirmation and changes.</div>")),
+            h.item("occasion", "Occasion or seating preference", h.html("<table><tr><th>Occasion</th><th>Example</th></tr><tr><td>Birthday</td><td>Quiet table</td></tr></table>")),
+            h.item("dietary", "Dietary restrictions", h.html("<div>Useful for tasting menus or limited kitchens.</div>")),
+            h.item("deposit", "Card hold or deposit", h.code("json", "{\"partySize\":8,\"depositRequired\":true}"))
+          ]),
+
+          // Editable review question; users can edit each term title, choose a state per term, and add new terms.
+          h.review("language", "Classify and edit the terms the reservation page should use.",
+            ["guest-facing", "staff-only", "legacy", "avoid"],
+            [
+              h.item("reservation", "Reservation - Confirmed table at a specific date and time.", h.html("<div>Source: currently used on the public website.</div>")),
+              h.item("booking", "Booking - Alternate word for a reservation.", h.html("<div>Source: appears in confirmation email templates.</div>")),
+              h.item("cover", "Cover - One seated guest in the restaurant.", h.html("<div>Source: comes from the POS and staffing reports.</div>")),
+              h.item("walk_in", "Walk-in - Guest arriving without a reservation.", h.html("<div>Source: used by hosts during service.</div>"))
+          ]),
+
+          // Bucket sorting question; sort columns are up to about 420px wide.
+          h.sort("policy_timing", "When should these policy decisions be made?",
+            ["decide now", "decide later", "staff can choose", "avoid"],
+            [
+              h.item("cancellations", "Cancellation window", h.html("<div>Affects guest trust and staff planning.</div>")),
+              h.item("large_parties", "Large-party cutoff"),
+              h.item("table_map", "Exact table assignment"),
+              h.item("colors", "Exact button colors")
+          ]),
+
+          // Rank order question; rank cards are compact full-width rows.
+          h.rank("tradeoffs", "If tradeoffs conflict, what matters most?", [
+            "Guest booking speed",
+            "Avoiding overbooking",
+            "Capturing special requests",
+            "Keeping staff workflow simple"
+          ]),
+
+          // Editable artifact question with syntax highlighting.
+          h.redline("confirmation_policy", "Edit this confirmation policy until it is safe to show guests.",
+            h.code("md", `Your table is held for 15 minutes after the reservation time.
+For parties of 8 or more, the restaurant may call to confirm details.
+Please call the restaurant if your party size changes.`))
+        ]
+      });
+    </script>
+  </body>
+</html>
 ```
 
-## Surface
+## Content Helpers
 
-- `h.text(id, prompt, options)`
-- `h.one(id, prompt, items, options)`
-- `h.many(id, prompt, items, options)`
-- `h.rank(id, prompt, items, options)`
-- `h.sort(id, prompt, buckets, items, options)`
-- `h.review(id, prompt, verbs, items, options)`
-- `h.redline(id, prompt, artifact, options)`
+- Plain strings are valid items.
+- Use `h.item(id, title, body, options)` when an item needs rich context.
+- Use `h.html("<div>...</div>")` for short trusted HTML.
+- Use `h.frame(src, options)` for an iframe preview.
+- Use `h.prosCons(pros, cons)` for compact tradeoffs.
+- Use `h.code(lang, value)` for code, prompt, or artifact text.
+- Rich bodies can be arrays.
 
-## Items
+## How to use?
 
-Plain strings are valid items. Use `h.item(id, title, body, options)` when an option needs rich context.
+You can create many questions, types of questions, add rich body parts to each question, but that does not mean you have to. The main goal is to make options clear for the user, allowing them to choose and steer, nothing else.
+User can leave comments, even for items they do not selected, which might allow to avoid uneccessary additional questions.
+Use the rich body context to be more expressive when it makes sense - add layout examples, visual guides, schemas, etc.
+Since it is a local file, you can safely include some visualisation libraries via CDN links for HTML payloads you adding to the questions.
 
-```js
-h.item("summary", "Human-readable summary",
-  h.prosCons(
-    ["Fast for agents to read", "Easy for users to inspect"],
-    ["Less precise for automation"]
-  ))
+Use only the questions and rich content needed to make the options clear. The goal is to help the user choose, correct, and steer, not to use every available feature.
+Rely on item comments to avoid unnecessary follow-up questions. Users can comment on any item, including items they do not select.
+Use rich item bodies when they make a decision easier: layout examples, visual guides, schemas, tradeoffs, previews, or code snippets.
+Because the interview is a local HTML file, rich HTML payloads may include CDN visualization libraries when they make an option clearer.
 
-h.item("preview", "Preview plus notes",
-  h.html("<div class='mini-preview'>...</div>"))
+## Output Behavior
 
-h.item("code", "Editable interaction model",
-  h.code("js", "select(anchor).preview().commitWhenValid();"))
-```
-
-## Rich Content
-
-- `h.html(markup)` renders trusted inline HTML.
-- `h.frame(src, options)` embeds an iframe preview. Use `srcdoc` in options for inline frames.
-- `h.prosCons(pros, cons)` renders two compact lists.
-- `h.code(lang, value)` renders highlighted code. Redline questions use the same code helper for editable artifacts.
-
-Rich content can be an array, so an item may combine images, tables, prose, pros/cons, frames, and code.
-
-## Options And Output
-
-- `pageMode` may be `"auto"`, `"all"`, or `"paged"`. Auto shows all questions when there are three or fewer and one question per page otherwise. Users can switch modes in the interview UI.
-- `many` and `review` support added items by default. Added items are selected/kept by default and only expose delete.
-- `sort` and `rank` use drag controls.
-- Comments open in a modal and only appear in output when the user wrote one.
-- Text and JSON exports include user-entered data and changed answers, not untouched defaults.
-- Default output is text. JSON is available automatically.
-<!-- shared-end -->
+- Users can comment on any item, including items they do not select.
+- Answers and comments can be exported as text or JSON.
