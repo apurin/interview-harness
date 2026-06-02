@@ -9,7 +9,7 @@ The output is a temporary HTML artifact. The library carries layout, state, navi
 - `interview-harness.js`: the browser library.
 - `skills/interview-harness/SKILL.md`: neutral authoring instructions.
 - `skills/interview-harness-opionated/SKILL.md`: opinionated authoring instructions and examples.
-- `example-interview.html` and `*-interview.html`: local examples and test artifacts.
+- `AGENTS.md`: project guidance for agents working in this repository.
 
 ## Usage
 
@@ -49,7 +49,7 @@ Open the HTML file in a browser. No build step is required.
 - `h.many(id, prompt, items, options)`: multiple choice with add-item support by default.
 - `h.rank(id, prompt, items, options)`: drag reorder.
 - `h.sort(id, prompt, buckets, items, options)`: drag items into columns.
-- `h.review(id, prompt, verbs, items, options)`: verdict pills, editable item text, and add-item support by default.
+- `h.review(id, prompt, verbs, items, options)`: single-select review states, editable item text, and add-item support by default.
 - `h.redline(id, prompt, artifact, options)`: editable code or text artifact.
 
 `pageMode` may be `"auto"`, `"all"`, or `"paged"`. Auto shows all questions when there are three or fewer and one question per page otherwise. Users can switch modes in the page.
@@ -75,7 +75,7 @@ The page exposes text and JSON export. Exports include only changed answers and 
 - selected choices
 - added items
 - changed rank or sort order
-- review verdicts that differ from the default
+- selected review states
 - edited review text
 - redline content changed from the original artifact
 - comments the user wrote

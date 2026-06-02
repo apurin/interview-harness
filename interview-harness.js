@@ -215,7 +215,7 @@
     if (questionDef.type === "many") return { selected: [], comments: {}, added: [] };
     if (questionDef.type === "rank") return { order: questionDef.items.map((entry) => entry.id), comments: {}, touched: false };
     if (questionDef.type === "sort") return { buckets: objectFrom(questionDef.items, ""), comments: {} };
-    if (questionDef.type === "review") return { verdicts: objectFrom(questionDef.items, defaultReviewVerdict(questionDef)), edits: objectFrom(questionDef.items, "title"), comments: {}, added: [] };
+    if (questionDef.type === "review") return { states: objectFrom(questionDef.items, ""), edits: objectFrom(questionDef.items, "title"), comments: {}, added: [] };
     if (questionDef.type === "redline") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
     return { answer: "" };
   }
@@ -260,19 +260,15 @@
     }
 
     if (questionDef.type === "review") {
-      answer.verdicts = Object.assign({}, initial.verdicts, safeObject(saved.verdicts));
+      answer.states = Object.assign({}, initial.states, safeObject(saved.states));
       answer.edits = Object.assign({}, initial.edits, safeObject(saved.edits));
       answer.added = normalizeAddedItems(saved.added);
-      const defaultVerdict = defaultReviewVerdict(questionDef);
-      questionDef.items.forEach((entry) => {
-        if (!answer.verdicts[entry.id]) answer.verdicts[entry.id] = defaultVerdict;
-      });
       answer.added.forEach((entry) => {
         if (answer.edits[entry.id] === undefined) answer.edits[entry.id] = entry.title;
       });
       answer.touched = Boolean(
         answer.added.length ||
-        Object.values(answer.verdicts).some(Boolean) ||
+        Object.values(answer.states).some(Boolean) ||
         Object.keys(answer.comments || {}).length ||
         questionDef.items.some((entry) => answer.edits[entry.id] && answer.edits[entry.id] !== entry.title)
       );
@@ -373,17 +369,15 @@
 
     if (questionDef.type === "review") {
       const items = answerItems(questionDef, answer);
-      const defaultVerdict = defaultReviewVerdict(questionDef);
       return Object.assign(base, {
         items: items.map((entry) => {
-          const verdict = (answer.verdicts && answer.verdicts[entry.id]) || "";
+          const state = (answer.states && answer.states[entry.id]) || "";
           const edited = (answer.edits && answer.edits[entry.id]) || entry.title;
           const comment = (answer.comments && answer.comments[entry.id]) || "";
-          const verdictChanged = verdict && verdict !== defaultVerdict;
-          if (!entry.custom && !verdictChanged && !comment && edited === entry.title) return null;
+          if (!entry.custom && !state && !comment && edited === entry.title) return null;
           const payload = { id: entry.id, title: entry.title };
           if (entry.custom) payload.added = edited;
-          if (verdictChanged) payload.verdict = verdict;
+          if (state) payload.state = state;
           if (!entry.custom && edited !== entry.title) payload.edited = edited;
           if (comment) payload.comment = comment;
           return payload;
@@ -466,7 +460,7 @@
         entry.items.forEach((item) => {
           const label = item.added || item.title || "Custom item";
           lines.push(`- ${label}`);
-          if (item.verdict) lines.push(`  Verdict: ${item.verdict}`);
+          if (item.state) lines.push(`  State: ${item.state}`);
           if (item.edited) lines.push(`  Edited: ${item.edited}`);
           if (item.comment) lines.push(`  Comment: ${item.comment}`);
         });
@@ -516,11 +510,10 @@
       );
     }
     if (questionDef.type === "review") {
-      const defaultVerdict = defaultReviewVerdict(questionDef);
       return answerItems(questionDef, answer).some((entry) => {
         const edited = answer.edits && answer.edits[entry.id] || entry.title;
-        const verdict = answer.verdicts && answer.verdicts[entry.id] || "";
-        return Boolean(entry.custom || verdict && verdict !== defaultVerdict || answer.comments && answer.comments[entry.id] || edited !== entry.title);
+        const state = answer.states && answer.states[entry.id] || "";
+        return Boolean(entry.custom || state || answer.comments && answer.comments[entry.id] || edited !== entry.title);
       });
     }
     if (questionDef.type === "redline") {
@@ -553,6 +546,8 @@
     }
 
     .ih-app, .ih-app * { box-sizing: border-box; }
+    html:has(.ih-app), body:has(.ih-app) { background: var(--ih-bg); }
+    body:has(.ih-app) { margin: 0; }
     .ih-app { min-height: 100vh; background: var(--ih-bg); color: var(--ih-ink); }
     .ih-app button, .ih-app input, .ih-app textarea, .ih-app select { font: inherit; }
     .ih-app button { cursor: pointer; color: inherit; }
@@ -595,8 +590,8 @@
     .ih-intro { margin: 4px 0 0; max-width: 980px; color: var(--ih-muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
     .ih-actions { display: flex; gap: 8px; justify-content: end; flex-wrap: wrap; }
 
-    .ih-timeline { max-width: var(--ih-max); margin: 0 auto; padding: 0 clamp(14px, 3vw, 34px) 10px; }
-    .ih-timeline-list { position: relative; display: flex; align-items: center; gap: clamp(8px, 1.4vw, 16px); overflow-x: auto; padding: 5px 0; }
+    .ih-timeline { max-width: var(--ih-max); margin: 0 auto; padding: 0 clamp(14px, 3vw, 34px) 10px; overflow-x: auto; }
+    .ih-timeline-list { position: relative; width: max-content; display: flex; align-items: center; gap: clamp(8px, 1.4vw, 16px); padding: 5px 0; }
     .ih-timeline-list::before { content: ""; position: absolute; left: 12px; right: 12px; top: 50%; height: 2px; background: var(--ih-line); transform: translateY(-50%); }
     .ih-timeline-dot {
       position: relative;
@@ -649,7 +644,7 @@
     .ih-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; align-items: start; }
     .ih-stack { display: grid; gap: 10px; }
     .ih-card {
-      border: 1px solid var(--ih-line);
+      border: 0;
       border-radius: var(--ih-radius);
       background: var(--ih-surface);
       padding: 14px;
@@ -661,12 +656,11 @@
       display: grid;
       gap: 10px;
       min-height: 118px;
-      border: 1px solid var(--ih-line);
-      transition: border-color .12s ease, box-shadow .12s ease;
+      transition: box-shadow .12s ease;
       align-content: start;
     }
-    .ih-choice:hover { border-color: var(--ih-line-strong); box-shadow: 0 8px 22px rgba(32, 36, 42, .08); }
-    .ih-choice.is-selected { border-color: var(--ih-accent); box-shadow: 0 0 0 3px var(--ih-accent-soft); }
+    .ih-choice:hover { box-shadow: 0 8px 22px rgba(32, 36, 42, .08); }
+    .ih-choice.is-selected { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
     .ih-item-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
     .ih-item-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .ih-item-title { margin: 0; font-size: clamp(16px, 1.25vw, 20px); line-height: 1.18; letter-spacing: 0; }
@@ -694,7 +688,7 @@
     .ih-label { display: block; font-size: 12px; color: var(--ih-muted); font-weight: 760; margin-bottom: 6px; }
     .ih-field {
       width: 100%;
-      border: 1px solid var(--ih-line);
+      border: 0;
       border-radius: var(--ih-radius);
       background: #fff;
       color: var(--ih-ink);
@@ -734,7 +728,7 @@
       grid-template-columns: 20px minmax(0, 1fr) auto;
       gap: 9px;
       align-items: start;
-      border: 1px solid var(--ih-line);
+      border: 0;
       border-radius: var(--ih-radius);
       background: white;
       padding: 9px 10px;
@@ -742,10 +736,14 @@
     }
     .ih-rank-item .ih-item-title, .ih-sort-card .ih-item-title { font-size: 14px; line-height: 1.25; }
     .ih-rank-item .ih-rich, .ih-sort-card .ih-rich { font-size: 12px; line-height: 1.35; }
+    .ih-sort-card > .ih-item-title { grid-column: 2; grid-row: 1; }
+    .ih-rank-item > .ih-item-title { grid-column: 2; grid-row: 1; }
+    .ih-sort-card > .ih-comment-button { grid-column: 3; grid-row: 1; justify-self: end; }
+    .ih-rank-item > .ih-comment-button { grid-column: 3; grid-row: 1; justify-self: end; }
+    .ih-rank-item > .ih-rich, .ih-sort-card > .ih-rich { grid-column: 1 / -1; grid-row: 2; }
     .ih-rank-item.is-dragging, .ih-sort-card.is-dragging { opacity: .55; }
-    .ih-rank-item.is-drop-target, .ih-bucket.is-drop-target { border-color: var(--ih-accent); box-shadow: 0 0 0 3px var(--ih-accent-soft); }
-    .ih-rank-item { grid-template-columns: 20px 34px minmax(0, 1fr) auto; align-items: start; }
-    .ih-rank-num { width: 28px; height: 28px; display: grid; place-items: center; color: var(--ih-ink); background: var(--ih-surface-2); border-radius: 999px; font-size: 12px; font-weight: 850; }
+    .ih-rank-item.is-drop-target, .ih-bucket.is-drop-target { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
+    .ih-rank-item { grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; }
     .ih-grip {
       width: 18px;
       height: 30px;
@@ -757,47 +755,45 @@
       align-self: center;
     }
     .ih-grip:active { cursor: grabbing; }
-    .ih-sort-frame { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
-    .ih-sort-board { display: flex; align-items: start; gap: 12px; min-width: max-content; }
-    .ih-bucket { width: min(280px, calc(100vw - 64px)); flex: 0 0 min(280px, calc(100vw - 64px)); border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
-    .ih-bucket[data-bucket-id=""] { width: min(340px, calc(100vw - 64px)); flex-basis: min(340px, calc(100vw - 64px)); }
+    .ih-sort-frame { --ih-sort-column-width: min(420px, calc(100vw - 64px)); overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
+    .ih-sort-board { display: flex; align-items: stretch; gap: 12px; min-width: max-content; }
+    .ih-bucket { width: var(--ih-sort-column-width); flex: 0 0 var(--ih-sort-column-width); display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
-    .ih-number { width: 72px; min-height: 38px; border: 1px solid var(--ih-line); border-radius: var(--ih-radius); padding: 8px; }
+    .ih-number { width: 72px; min-height: 38px; border: 0; border-radius: var(--ih-radius); padding: 8px; }
 
     .ih-review-card { display: grid; gap: 10px; }
     .ih-review-row { display: grid; gap: 9px; }
     .ih-review-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .ih-verdict-pill {
+    .ih-review-options {
       display: inline-flex;
       align-items: center;
-      min-height: 36px;
+      flex-wrap: wrap;
+      gap: 4px;
+      border-radius: 999px;
+      background: var(--ih-surface-2);
+      padding: 4px;
+    }
+    .ih-app .ih-review-option, .ih-app .ih-added-pill { font-size: 12px; font-weight: 850; line-height: 1; }
+    .ih-review-option {
+      min-height: 30px;
       border: 0;
       border-radius: 999px;
       background: transparent;
-      overflow: hidden;
-      box-shadow: none;
-    }
-    .ih-app .ih-verb, .ih-app .ih-added-pill { font-size: 12px; font-weight: 850; line-height: 1; }
-    .ih-verb {
-      min-width: 38px;
-      min-height: 36px;
-      border: 0;
-      background: color-mix(in srgb, var(--ih-verdict-color, var(--ih-accent)) 26%, white);
-      padding: 0 11px;
-      color: transparent;
+      padding: 0 10px;
+      color: var(--ih-muted);
       white-space: nowrap;
-      transition: min-width .14s ease, background-color .14s ease, color .14s ease;
+      transition: background-color .14s ease, color .14s ease, box-shadow .14s ease;
     }
-    .ih-verb:hover { background: color-mix(in srgb, var(--ih-verdict-color, var(--ih-accent)) 40%, white); }
-    .ih-verb.is-selected { min-width: 98px; color: white; background: var(--ih-verdict-color, var(--ih-accent)); }
-    .ih-added-pill { min-width: 98px; min-height: 36px; border-radius: 999px; display: inline-grid; place-items: center; padding: 0 14px; background: var(--ih-good); color: white; }
+    .ih-review-option:hover { background: color-mix(in srgb, var(--ih-surface) 72%, white); color: var(--ih-ink); }
+    .ih-review-option.is-selected { color: var(--ih-ink); background: #fff; box-shadow: 0 1px 4px rgba(32, 36, 42, .08); }
+    .ih-added-pill { min-height: 30px; border-radius: 999px; display: inline-grid; place-items: center; padding: 0 12px; background: var(--ih-surface-2); color: var(--ih-muted); }
 
     .ih-redline { display: grid; gap: 10px; }
     .ih-code-editor-host, .ih-code-fallback, .ih-code-viewer-host, .ih-code-viewer-fallback {
       min-height: 440px;
-      border: 1px solid var(--ih-line);
+      border: 0;
       border-radius: var(--ih-radius);
       background: #282c34;
       color: #abb2bf;
@@ -827,7 +823,7 @@
     .ih-toast.is-visible { opacity: 1; transform: none; }
 
     .ih-comment-popover-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(32, 36, 42, .28); display: grid; place-items: center; padding: 18px; }
-    .ih-comment-popover { width: min(720px, 100%); border: 1px solid var(--ih-line); border-radius: var(--ih-radius); background: var(--ih-surface); box-shadow: var(--ih-shadow); padding: 14px; }
+    .ih-comment-popover { width: min(720px, 100%); border: 0; border-radius: var(--ih-radius); background: var(--ih-surface); box-shadow: var(--ih-shadow); padding: 14px; }
     .ih-comment-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
     .ih-comment-head h3 { margin: 0; font-size: 16px; }
     .ih-comment-popover textarea { min-height: 150px; max-height: 55vh; width: 100%; resize: none; line-height: 1.45; }
@@ -986,17 +982,14 @@
     questionDef.items.forEach((entry) => { if (!order.includes(entry.id)) order.push(entry.id); });
     return `
       <div class="ih-rank-list ih-compact-list" data-sortable-rank>
-        ${order.map((id, index) => {
+        ${order.map((id) => {
           const entry = questionDef.items.find((candidate) => candidate.id === id);
           return `
             <article class="ih-rank-item" data-item-id="${escapeAttr(entry.id)}">
               <button class="ih-grip" type="button" aria-label="Drag to reorder"></button>
-              <div class="ih-rank-num">${index + 1}</div>
-              <div>
-                <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-                ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
-              </div>
+              <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
               ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on rank item")}
+              ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
             </article>
           `;
         }).join("")}
@@ -1040,11 +1033,9 @@
     return `
       <article class="ih-sort-card" data-item-id="${escapeAttr(entry.id)}">
         <button class="ih-grip" type="button" aria-label="Drag to bucket"></button>
-        <div>
-          <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-          ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
-        </div>
+        <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
         ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on sort item")}
+        ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
       </article>
     `;
   }
@@ -1056,7 +1047,7 @@
           <article class="ih-card ih-review-card">
             <div class="ih-review-row" data-item-id="${escapeAttr(entry.id)}">
               <div class="ih-review-top">
-                ${entry.custom ? renderAddedPill() : renderVerdictPill(questionDef, answer, entry)}
+                ${entry.custom ? renderAddedPill() : renderReviewOptions(questionDef, answer, entry)}
                 <div class="ih-item-actions">
                   ${entry.custom ? "" : renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on reviewed item")}
                   ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-item-id="${escapeAttr(entry.id)}" aria-label="Remove custom item">${trashIcon()}</button>` : ""}
@@ -1168,13 +1159,13 @@
     return `<div class="ih-meta">${values.map((entry) => `<span class="ih-pill">${escapeHTML(valueToText(entry))}</span>`).join("")}</div>`;
   }
 
-  function renderVerdictPill(questionDef, answer, entry) {
-    const selected = answer.verdicts && answer.verdicts[entry.id] || defaultReviewVerdict(questionDef);
+  function renderReviewOptions(questionDef, answer, entry) {
+    const selected = answer.states && answer.states[entry.id] || "";
     return `
-      <div class="ih-verdict-pill" role="radiogroup" aria-label="Verdict for ${escapeAttr(entry.title)}">
-        ${questionDef.verbs.map((verb, index) => {
+      <div class="ih-review-options" role="radiogroup" aria-label="Review state for ${escapeAttr(entry.title)}">
+        ${questionDef.verbs.map((verb) => {
           const isSelected = selected === verb.id;
-          return `<button class="ih-verb ${isSelected ? "is-selected" : ""}" style="--ih-verdict-color:${verdictColor(index)}" type="button" data-action="review-verdict" data-item-id="${escapeAttr(entry.id)}" data-verdict="${escapeAttr(verb.id)}" aria-label="${escapeAttr(verb.title)}" title="${escapeAttr(verb.title)}">${isSelected ? escapeHTML(verb.title) : ""}</button>`;
+          return `<button class="ih-review-option ${isSelected ? "is-selected" : ""}" role="radio" aria-checked="${isSelected ? "true" : "false"}" type="button" data-action="review-state" data-item-id="${escapeAttr(entry.id)}" data-review-state="${escapeAttr(verb.id)}">${escapeHTML(verb.title)}</button>`;
         }).join("")}
       </div>
     `;
@@ -1232,16 +1223,6 @@
     if (!answer.comments) answer.comments = {};
     if (textValue.trim()) answer.comments[itemId] = textValue;
     else delete answer.comments[itemId];
-  }
-
-  function verdictColor(index) {
-    const colors = ["#0d7d48", "#2457ff", "#a73535", "#9a5d00", "#6d4bb4", "#16728a"];
-    return colors[index % colors.length];
-  }
-
-  function defaultReviewVerdict(questionDef) {
-    const unsure = asArray(questionDef.verbs).find((entry) => /unsure/i.test(entry.id) || /unsure/i.test(entry.title));
-    return unsure ? unsure.id : (questionDef.verbs[questionDef.verbs.length - 1] && questionDef.verbs[questionDef.verbs.length - 1].id) || "";
   }
 
   // App runtime --------------------------------------------------------------
@@ -1343,7 +1324,7 @@
       this.activateContext(context);
       if (action === "select-one") return this.selectOne(actionEl.dataset.itemId, context);
       if (action === "toggle-many") return this.toggleMany(actionEl.dataset.itemId, context);
-      if (action === "review-verdict") return this.setReviewVerdict(actionEl.dataset.itemId, actionEl.dataset.verdict, context);
+      if (action === "review-state") return this.setReviewState(actionEl.dataset.itemId, actionEl.dataset.reviewState, context);
       if (action === "add-item") return this.addItem(context);
       if (action === "remove-added") return this.removeAdded(actionEl.dataset.itemId || numberOr(actionEl.dataset.addedIndex, -1), context);
     }
@@ -1641,18 +1622,18 @@
       this.refreshExport();
     }
 
-    setReviewVerdict(itemId, verdict, context) {
+    setReviewState(itemId, state, context) {
       const answer = context && context.answer;
       if (!answer) return;
-      answer.verdicts[itemId] = verdict;
+      answer.states[itemId] = state;
       answer.touched = true;
       this.save();
       const row = this.sectionForContext(context) && this.sectionForContext(context).querySelector(`.ih-review-row[data-item-id="${cssEscape(itemId)}"]`);
       if (row) {
-        row.querySelectorAll(".ih-verb").forEach((button) => {
-          const selected = button.dataset.verdict === verdict;
+        row.querySelectorAll(".ih-review-option").forEach((button) => {
+          const selected = button.dataset.reviewState === state;
           button.classList.toggle("is-selected", selected);
-          button.textContent = selected ? button.getAttribute("aria-label") : "";
+          button.setAttribute("aria-checked", selected ? "true" : "false");
         });
       }
       this.refreshChrome();
@@ -1690,7 +1671,7 @@
         if (questionDef.type === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
         if (answer.comments) delete answer.comments[removed.id];
         if (answer.edits) delete answer.edits[removed.id];
-        if (answer.verdicts) delete answer.verdicts[removed.id];
+        if (answer.states) delete answer.states[removed.id];
       }
       answer.touched = true;
       this.save();
@@ -1767,10 +1748,6 @@
       order.forEach((id) => {
         const card = list.querySelector(`.ih-rank-item[data-item-id="${cssEscape(id)}"]`);
         if (card) list.appendChild(card);
-      });
-      list.querySelectorAll(".ih-rank-item").forEach((card, index) => {
-        const number = card.querySelector(".ih-rank-num");
-        if (number) number.textContent = String(index + 1);
       });
     }
 
@@ -2029,7 +2006,7 @@
       return questionDef.items.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id]));
     }
     if (questionDef.type === "review") {
-      return answerItems(questionDef, answer).every((entry) => Boolean(answer.verdicts && answer.verdicts[entry.id]));
+      return questionDef.items.every((entry) => Boolean(answer.states && answer.states[entry.id]));
     }
     if (questionDef.type === "redline") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
     return true;
