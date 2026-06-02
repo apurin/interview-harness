@@ -44,7 +44,7 @@ Create one standalone HTML file that the user can open directly in a browser. Re
             ])
           ]),
 
-          // Multi-select question with add-another support; rich choice cards are about 430px wide.
+          // Multi-select question; users can add custom items.
           h.many("booking_details", "What should guests provide before confirming?", [
             h.item("contact", "Name, phone, and email", h.html("<div>Needed for confirmation and changes.</div>")),
             h.item("occasion", "Occasion or seating preference", h.html("<table><tr><th>Occasion</th><th>Example</th></tr><tr><td>Birthday</td><td>Quiet table</td></tr></table>")),
@@ -81,7 +81,7 @@ Create one standalone HTML file that the user can open directly in a browser. Re
           ]),
 
           // Editable artifact question with syntax highlighting.
-          h.redline("confirmation_policy", "Edit this confirmation policy until it is safe to show guests.",
+          h.revise("confirmation_policy", "Edit this confirmation policy until it is safe to show guests.",
             h.code("md", `Your table is held for 15 minutes after the reservation time.
 For parties of 8 or more, the restaurant may call to confirm details.
 Please call the restaurant if your party size changes.`))
@@ -100,6 +100,7 @@ Please call the restaurant if your party size changes.`))
 - Use `h.frame(src, options)` for an iframe preview. Frames show a compact source-file header and a new-tab icon button.
 - Use `h.prosCons(pros, cons)` for compact tradeoffs.
 - Use `h.code(lang, value)` for code, prompt, or artifact text.
+- Use `h.revise(id, prompt, artifact, options)` when the user should edit a short code or text artifact.
 - Rich bodies can be arrays.
 
 ## How to use?

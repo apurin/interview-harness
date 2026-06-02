@@ -39,7 +39,7 @@
   }
 
   function many(id, prompt, items, options) {
-    return question("many", id, prompt, Object.assign({ items, allowAdd: true }, options || {}));
+    return question("many", id, prompt, Object.assign({ items }, options || {}));
   }
 
   function rank(id, prompt, items, options) {
@@ -51,11 +51,11 @@
   }
 
   function review(id, prompt, verbs, items, options) {
-    return question("review", id, prompt, Object.assign({ verbs, items, allowAdd: true }, options || {}));
+    return question("review", id, prompt, Object.assign({ verbs, items }, options || {}));
   }
 
-  function redline(id, prompt, artifact, options) {
-    return question("redline", id, prompt, Object.assign({ artifact }, options || {}));
+  function revise(id, prompt, artifact, options) {
+    return question("revise", id, prompt, Object.assign({ artifact }, options || {}));
   }
 
   function item(id, title, body, options) {
@@ -88,7 +88,6 @@
     config.intro = String(config.intro || "");
     config.questions = asArray(config.questions || config.steps || config.items).map(normalizeQuestion);
     config.storageKey = config.storageKey === false ? false : String(config.storageKey || defaultStorageKey(config.title));
-    config.pageMode = ["auto", "paged", "all"].includes(config.pageMode) ? config.pageMode : "auto";
     config.copyTextLabel = config.copyTextLabel || "Copy text";
     config.copyJsonLabel = config.copyJsonLabel || "Copy JSON";
     return config;
@@ -100,7 +99,6 @@
         type: "text",
         id: `q${index + 1}`,
         prompt: input,
-        help: "",
         placeholder: "",
         multiline: true
       };
@@ -114,9 +112,7 @@
     const base = {
       type,
       id,
-      prompt,
-      help: String(raw.help || raw.description || raw.note || ""),
-      optional: Boolean(raw.optional)
+      prompt
     };
 
     if (type === "text") {
@@ -137,12 +133,11 @@
     if (type === "review") {
       return Object.assign(base, {
         verbs: normalizeBuckets(raw.verbs || raw.buckets || raw.choices || ["keep", "revise", "remove"]),
-        items: normalizeItems(raw.items || raw.options),
-        allowAdd: raw.allowAdd !== false
+        items: normalizeItems(raw.items || raw.options)
       });
     }
 
-    if (type === "redline") {
+    if (type === "revise") {
       return Object.assign(base, {
         artifact: normalizeArtifact(raw.artifact || raw.body || raw.content || raw.value || ""),
         language: raw.language || ""
@@ -150,13 +145,12 @@
     }
 
     return Object.assign(base, {
-      items: normalizeItems(raw.items || raw.options || raw.choices),
-      allowAdd: type === "many" ? raw.allowAdd !== false : Boolean(raw.allowAdd)
+      items: normalizeItems(raw.items || raw.options || raw.choices)
     });
   }
 
   function inferQuestionType(raw) {
-    if (raw.artifact || raw.content) return "redline";
+    if (raw.artifact || raw.content) return "revise";
     if (raw.buckets) return "sort";
     if (raw.verbs) return "review";
     if (raw.items || raw.options || raw.choices) return raw.multiple ? "many" : "one";
@@ -216,7 +210,7 @@
     if (questionDef.type === "rank") return { order: questionDef.items.map((entry) => entry.id), comments: {}, touched: false };
     if (questionDef.type === "sort") return { buckets: objectFrom(questionDef.items, ""), comments: {} };
     if (questionDef.type === "review") return { states: objectFrom(questionDef.items, ""), edits: objectFrom(questionDef.items, "title"), comments: {}, added: [] };
-    if (questionDef.type === "redline") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
+    if (questionDef.type === "revise") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
     return { answer: "" };
   }
 
@@ -274,7 +268,7 @@
       );
     }
 
-    if (questionDef.type === "redline") {
+    if (questionDef.type === "revise") {
       answer.summary = String(saved.summary || "");
       answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
     }
@@ -385,7 +379,7 @@
       });
     }
 
-    if (questionDef.type === "redline") {
+    if (questionDef.type === "revise") {
       const output = { summary: answer.summary || "" };
       if (String(answer.content || "") !== artifactText(questionDef.artifact)) output.content = answer.content || "";
       return Object.assign(base, output);
@@ -466,7 +460,7 @@
         });
       }
 
-      if (entry.type === "redline") {
+      if (entry.type === "revise") {
         if (entry.content !== undefined) {
           lines.push("Edited artifact:");
           lines.push("```");
@@ -516,7 +510,7 @@
         return Boolean(entry.custom || state || answer.comments && answer.comments[entry.id] || edited !== entry.title);
       });
     }
-    if (questionDef.type === "redline") {
+    if (questionDef.type === "revise") {
       return Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary);
     }
     return false;
@@ -626,7 +620,7 @@
     .ih-question-head { margin-bottom: clamp(16px, 2.4vw, 24px); }
     .ih-kicker { margin: 0 0 8px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
     .ih-prompt { margin: 0; max-width: 980px; font-size: clamp(22px, 2.5vw, 34px); line-height: 1.12; letter-spacing: 0; }
-    .ih-help { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
+    .ih-export-note { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
 
     .ih-btn {
       min-height: 36px;
@@ -817,8 +811,6 @@
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
-    .ih-number { width: 72px; min-height: 38px; border: 0; border-radius: var(--ih-radius); padding: 8px; }
-
     .ih-review-card { display: grid; gap: 10px; }
     .ih-review-row { display: grid; gap: 9px; }
     .ih-review-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -846,7 +838,7 @@
     .ih-review-option.is-selected { color: var(--ih-accent-ink); background: var(--ih-accent); box-shadow: 0 1px 4px rgb(8 14 13 / 18%); }
     .ih-added-pill { min-height: 30px; border-radius: 999px; display: inline-grid; place-items: center; padding: 0 12px; background: var(--ih-surface-2); color: var(--ih-muted); }
 
-    .ih-redline { display: grid; gap: 10px; }
+    .ih-revise { display: grid; gap: 10px; }
     .ih-code-editor-host, .ih-code-fallback, .ih-code-viewer-host, .ih-code-viewer-fallback {
       min-height: 440px;
       border: 0;
@@ -860,8 +852,8 @@
     .ih-code-editor-host .cm-editor, .ih-code-viewer-host .cm-editor { font-size: 13px; }
     .ih-code-editor-host .cm-scroller, .ih-code-viewer-host .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; }
     .ih-code-fallback { display: block; width: 100%; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; white-space: pre; }
-    [data-redline].has-editor .ih-code-editor-host { display: block; }
-    [data-redline].has-editor .ih-code-fallback { display: none; }
+    [data-revise].has-editor .ih-code-editor-host { display: block; }
+    [data-revise].has-editor .ih-code-fallback { display: none; }
     .ih-code-viewer { display: grid; margin-top: 8px; }
     .ih-code-viewer-host, .ih-code-viewer-fallback { min-height: 0; }
     .ih-code-viewer-host .cm-editor { min-height: 0; }
@@ -974,7 +966,6 @@
           <div>
             <p class="ih-kicker">Question ${index + 1} / ${instance.config.questions.length}</p>
             <h2 class="ih-prompt">${escapeHTML(questionDef.prompt)}</h2>
-            ${questionDef.help ? `<p class="ih-help">${escapeHTML(questionDef.help)}</p>` : ""}
           </div>
         </div>
         ${renderQuestionBody(questionDef, instance.state.answers[questionDef.id])}
@@ -989,7 +980,7 @@
     if (questionDef.type === "rank") return renderRank(questionDef, answer);
     if (questionDef.type === "sort") return renderSort(questionDef, answer);
     if (questionDef.type === "review") return renderReview(questionDef, answer);
-    if (questionDef.type === "redline") return renderRedline(questionDef, answer);
+    if (questionDef.type === "revise") return renderRevise(questionDef, answer);
     return renderText(questionDef, answer);
   }
 
@@ -1006,7 +997,7 @@
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
     const gridClass = questionDef.items.some((entry) => entry.body) ? "ih-grid" : "ih-stack";
     const items = answerItems(questionDef, answer).map((entry) => renderChoiceItem(entry, answer, selected.includes(entry.id), multiple)).join("");
-    const addRow = multiple && questionDef.allowAdd ? renderAddRow("Add another item") : "";
+    const addRow = multiple ? renderAddRow("Add another item") : "";
     return `<div class="${gridClass}">${items}</div>${addRow}`;
   }
 
@@ -1138,20 +1129,20 @@
           </article>
         `).join("")}
       </div>
-      ${questionDef.allowAdd ? renderAddRow("Add another statement or term") : ""}
+      ${renderAddRow("Add another statement or term")}
     `;
   }
 
-  function renderRedline(questionDef, answer) {
+  function renderRevise(questionDef, answer) {
     return `
-      <div class="ih-redline">
-        <div class="ih-card" data-redline>
+      <div class="ih-revise">
+        <div class="ih-card" data-revise>
           <div class="ih-item-top">
             <label class="ih-label">Editable artifact</label>
-            ${renderCommentButton("redline-summary", "", answer.summary || "", "Comment on edited artifact")}
+            ${renderCommentButton("revise-summary", "", answer.summary || "", "Comment on edited artifact")}
           </div>
           <div class="ih-code-editor-host" data-code-editor data-lang="${escapeAttr(questionDef.artifact && questionDef.artifact.lang || questionDef.language || "")}"></div>
-          <textarea class="ih-code-fallback ih-auto-field" data-input="redline-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
+          <textarea class="ih-code-fallback ih-auto-field" data-input="revise-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
           <div class="ih-editor-loading" data-editor-loading>Loading syntax editor...</div>
         </div>
       </div>
@@ -1167,7 +1158,7 @@
           <div>
             <p class="ih-kicker">Output</p>
             <h2 class="ih-prompt">Export the answer summary.</h2>
-            <p class="ih-help">The text version is the default handoff. JSON is available when the next step benefits from structure.</p>
+            <p class="ih-export-note">The text version is the default handoff. JSON is available when the next step benefits from structure.</p>
           </div>
         </div>
         <div class="ih-export">
@@ -1308,13 +1299,13 @@
 
   function getCommentValue(answer, kind, itemId) {
     if (!answer) return "";
-    if (kind === "redline-summary") return answer.summary || "";
+    if (kind === "revise-summary") return answer.summary || "";
     return answer.comments && answer.comments[itemId] || "";
   }
 
   function setCommentValue(answer, kind, itemId, value) {
     const textValue = String(value || "");
-    if (kind === "redline-summary") {
+    if (kind === "revise-summary") {
       answer.summary = textValue;
       return;
     }
@@ -1330,7 +1321,7 @@
       this.config = config;
       this.root = resolveTarget(config.target);
       this.state = createInitialState(config.questions);
-      this.state.viewMode = config.pageMode === "auto" ? (config.questions.length <= 3 ? "all" : "paged") : config.pageMode;
+      this.state.viewMode = initialViewMode(config.questions);
       this.saveTimer = null;
       this.chromeFrame = null;
       this.sortables = [];
@@ -1461,19 +1452,14 @@
         setCommentValue(answer, this.state.commentEditor.kind, this.state.commentEditor.itemId, input.value);
         this.syncOpenCommentButton();
       }
-      if (kind === "sort-bucket") this.setSortBucket(input.dataset.itemId, input.value, context);
       if (kind === "review-edit") answer.edits[input.dataset.itemId] = input.value;
       if (kind === "added-title") this.updateAddedTitle(input.dataset.itemId, input.value, context);
-      if (kind === "redline-content") answer.content = input.value;
+      if (kind === "revise-content") answer.content = input.value;
 
       answer.touched = true;
       autoGrowTextarea(input);
-      const immediate = kind === "sort-bucket";
-      if (immediate) this.save();
-      else this.scheduleSave();
-      if (kind === "sort-bucket") this.syncSortDom(context);
-      if (immediate) this.refreshExport();
-      else this.scheduleExport();
+      this.scheduleSave();
+      this.scheduleExport();
       this.scheduleChrome();
     }
 
@@ -1618,9 +1604,9 @@
       const hosts = Array.from(this.root.querySelectorAll("[data-code-editor]"));
       hosts.forEach((host) => {
         const context = this.contextFromNode(host);
-        if (!context || context.questionDef.type !== "redline") return;
-        const card = host.closest("[data-redline]");
-        const fallback = card && card.querySelector("[data-input='redline-content']");
+        if (!context || context.questionDef.type !== "revise") return;
+        const card = host.closest("[data-revise]");
+        const fallback = card && card.querySelector("[data-input='revise-content']");
         const loading = card && card.querySelector("[data-editor-loading]");
         loadCodeMirror(host.dataset.lang || "").then(({ EditorView, basicSetup, theme, language }) => {
           if (!host.isConnected) return;
@@ -1928,8 +1914,6 @@
         const bucketId = answer.buckets && answer.buckets[card.dataset.itemId] || "";
         const bucket = section.querySelector(`.ih-bucket[data-bucket-id="${cssEscape(bucketId)}"] .ih-bucket-list`);
         if (bucket && card.parentElement !== bucket) bucket.appendChild(card);
-        const select = card.querySelector("[data-input='sort-bucket']");
-        if (select) select.value = bucketId;
         card.querySelectorAll("[data-action='move-sort-item']").forEach((button) => {
           const selected = (button.dataset.bucketId || "") === bucketId;
           button.classList.toggle("is-current", selected);
@@ -2148,6 +2132,10 @@
     return "Next";
   }
 
+  function initialViewMode(questions) {
+    return questions.length <= 3 ? "all" : "paged";
+  }
+
   function timelineState(instance, questionDef, index) {
     const answer = instance.state.answers[questionDef.id];
     return [
@@ -2157,14 +2145,11 @@
   }
 
   function isInterviewReady(instance) {
-    return instance.config.questions.every((questionDef) => {
-      return questionDef.optional || isQuestionAnswered(questionDef, instance.state.answers[questionDef.id]);
-    });
+    return instance.config.questions.every((questionDef) => isQuestionAnswered(questionDef, instance.state.answers[questionDef.id]));
   }
 
   function isQuestionAnswered(questionDef, answer) {
     if (!answer) return false;
-    if (questionDef.optional) return true;
     if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
     if (questionDef.type === "one") return Boolean(answer.selected);
     if (questionDef.type === "many") return asArray(answer.selected).length > 0;
@@ -2175,7 +2160,7 @@
     if (questionDef.type === "review") {
       return questionDef.items.every((entry) => Boolean(answer.states && answer.states[entry.id]));
     }
-    if (questionDef.type === "redline") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
+    if (questionDef.type === "revise") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
     return true;
   }
 
@@ -2325,7 +2310,7 @@
     rank,
     sort,
     review,
-    redline,
+    revise,
     item,
     frame,
     html,
