@@ -26,67 +26,62 @@
 
   // Authoring helpers --------------------------------------------------------
 
-  function question(type, id, prompt, extra) {
-    return Object.assign({ type, id, prompt }, extra || {});
+  function question(type, config) {
+    return Object.assign({ type }, config || {});
   }
 
-  function text(id, prompt, options) {
-    return question("text", id, prompt, options);
+  function text(config) {
+    return question("text", config);
   }
 
-  function one(id, prompt, items, options) {
-    return question("one", id, prompt, Object.assign({ items }, options || {}));
+  function choice(config) {
+    return question("choice", config);
   }
 
-  function many(id, prompt, items, options) {
-    return question("many", id, prompt, Object.assign({ items }, options || {}));
+  function rank(config) {
+    return question("rank", config);
   }
 
-  function rank(id, prompt, items, options) {
-    return question("rank", id, prompt, Object.assign({ items }, options || {}));
+  function bucket(config) {
+    return question("bucket", config);
   }
 
-  function sort(id, prompt, buckets, items, options) {
-    return question("sort", id, prompt, Object.assign({ buckets, items }, options || {}));
+  function classify(config) {
+    return question("classify", config);
   }
 
-  function review(id, prompt, verbs, items, options) {
-    return question("review", id, prompt, Object.assign({ verbs, items }, options || {}));
+  function edit(config) {
+    return question("edit", config);
   }
 
-  function revise(id, prompt, artifact, options) {
-    return question("revise", id, prompt, Object.assign({ artifact }, options || {}));
+  function option(config) {
+    return Object.assign({}, config || {});
   }
 
-  function item(id, title, body, options) {
-    if (arguments.length === 1 && typeof id === "object") return id;
-    return Object.assign({ id, title, body }, options || {});
+  function frame(config) {
+    return Object.assign({ view: "frame" }, config || {});
   }
 
-  function frame(src, options) {
-    return Object.assign({ view: "frame", src }, options || {});
+  function html(config) {
+    return Object.assign({ view: "html" }, config || {});
   }
 
-  function html(markup, options) {
-    return Object.assign({ view: "html", markup }, options || {});
+  function prosCons(config) {
+    return Object.assign({ view: "prosCons" }, config || {});
   }
 
-  function prosCons(pros, cons, options) {
-    return Object.assign({ view: "prosCons", pros, cons }, options || {});
-  }
-
-  function code(lang, value, options) {
-    return Object.assign({ view: "code", lang, value }, options || {});
+  function code(config) {
+    return Object.assign({ view: "code" }, config || {});
   }
 
   // Normalization ------------------------------------------------------------
 
   function normalizeConfig(input, target) {
-    const config = Array.isArray(input) ? { questions: input } : Object.assign({}, input || {});
+    const config = Object.assign({}, input || {});
     config.target = target || config.target || `#${DEFAULT_TARGET_ID}`;
     config.title = String(config.title || "Interview");
     config.intro = String(config.intro || "");
-    config.questions = asArray(config.questions || config.steps || config.items).map(normalizeQuestion);
+    config.questions = asArray(config.questions).map(normalizeQuestion);
     config.storageKey = config.storageKey === false ? false : String(config.storageKey || defaultStorageKey(config.title));
     config.copyTextLabel = config.copyTextLabel || "Copy text";
     config.copyJsonLabel = config.copyJsonLabel || "Copy JSON";
@@ -123,21 +118,29 @@
       });
     }
 
-    if (type === "sort") {
+    if (type === "choice") {
       return Object.assign(base, {
-        buckets: normalizeBuckets(raw.buckets || raw.choices || raw.verbs || ["yes", "maybe", "no"]),
-        items: normalizeItems(raw.items || raw.options || raw.choices)
+        select: normalizeChoiceSelect(raw.select),
+        cardsPerRow: normalizeCardsPerRow(raw.cardsPerRow),
+        options: normalizeOptions(raw.options)
       });
     }
 
-    if (type === "review") {
+    if (type === "bucket") {
       return Object.assign(base, {
-        verbs: normalizeBuckets(raw.verbs || raw.buckets || raw.choices || ["keep", "revise", "remove"]),
-        items: normalizeItems(raw.items || raw.options)
+        buckets: normalizeBuckets(raw.buckets || ["yes", "maybe", "no"]),
+        options: normalizeOptions(raw.options)
       });
     }
 
-    if (type === "revise") {
+    if (type === "classify") {
+      return Object.assign(base, {
+        states: normalizeBuckets(raw.states || ["keep", "edit", "remove"]),
+        options: normalizeOptions(raw.options)
+      });
+    }
+
+    if (type === "edit") {
       return Object.assign(base, {
         artifact: normalizeArtifact(raw.artifact || raw.body || raw.content || raw.value || ""),
         language: raw.language || ""
@@ -145,35 +148,45 @@
     }
 
     return Object.assign(base, {
-      items: normalizeItems(raw.items || raw.options || raw.choices)
+      options: normalizeOptions(raw.options)
     });
   }
 
   function inferQuestionType(raw) {
-    if (raw.artifact || raw.content) return "revise";
-    if (raw.buckets) return "sort";
-    if (raw.verbs) return "review";
-    if (raw.items || raw.options || raw.choices) return raw.multiple ? "many" : "one";
+    if (raw.artifact || raw.content) return "edit";
+    if (raw.buckets) return "bucket";
+    if (raw.states) return "classify";
+    if (raw.options || raw.select) return "choice";
     return "text";
   }
 
-  function normalizeItems(input) {
-    return asArray(input).map((entry, index) => normalizeItem(entry, index));
+  function normalizeChoiceSelect(select) {
+    return select === "many" ? "many" : "one";
   }
 
-  function normalizeItem(entry, index) {
+  function normalizeCardsPerRow(value) {
+    if (value === undefined || value === null || value === "" || value === "auto") return "auto";
+    const numeric = Number(value);
+    return [1, 2, 3, 4].includes(numeric) ? numeric : "auto";
+  }
+
+  function normalizeOptions(input) {
+    return asArray(input).map((entry, index) => normalizeOption(entry, index));
+  }
+
+  function normalizeOption(entry, index) {
     if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
       const title = String(entry);
-      return { id: slugify(title) || `item-${index + 1}`, title, body: "" };
+      return { id: slugify(title) || `option-${index + 1}`, title, body: "" };
     }
 
     const raw = Object.assign({}, entry || {});
-    const title = String(raw.title || raw.label || raw.name || raw.id || `Item ${index + 1}`);
+    const title = String(raw.title || raw.label || raw.name || raw.id || `Option ${index + 1}`);
     return {
-      id: String(raw.id || slugify(title) || `item-${index + 1}`),
+      id: String(raw.id || slugify(title) || `option-${index + 1}`),
       title,
       body: raw.body || raw.detail || raw.description || raw.preview || "",
-      meta: raw.meta || raw.tags || null
+      tags: raw.tags || null
     };
   }
 
@@ -205,12 +218,15 @@
 
   function initialAnswer(questionDef) {
     if (questionDef.type === "text") return { answer: questionDef.defaultValue || "" };
-    if (questionDef.type === "one") return { selected: "", comments: {} };
-    if (questionDef.type === "many") return { selected: [], comments: {}, added: [] };
-    if (questionDef.type === "rank") return { order: questionDef.items.map((entry) => entry.id), comments: {}, touched: false };
-    if (questionDef.type === "sort") return { buckets: objectFrom(questionDef.items, ""), comments: {} };
-    if (questionDef.type === "review") return { states: objectFrom(questionDef.items, ""), edits: objectFrom(questionDef.items, "title"), comments: {}, added: [] };
-    if (questionDef.type === "revise") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
+    if (questionDef.type === "choice") {
+      return questionDef.select === "many"
+        ? { selected: [], comments: {}, added: [] }
+        : { selected: "", comments: {} };
+    }
+    if (questionDef.type === "rank") return { order: questionDef.options.map((entry) => entry.id), comments: {}, touched: false };
+    if (questionDef.type === "bucket") return { buckets: objectFrom(questionDef.options, ""), comments: {} };
+    if (questionDef.type === "classify") return { states: objectFrom(questionDef.options, ""), edits: objectFrom(questionDef.options, "title"), comments: {}, added: [] };
+    if (questionDef.type === "edit") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
     return { answer: "" };
   }
 
@@ -235,28 +251,28 @@
     const answer = Object.assign({}, initial, saved || {});
     if (initial.comments) answer.comments = Object.assign({}, initial.comments, safeObject(saved.comments));
 
-    if (questionDef.type === "many") {
+    if (questionDef.type === "choice" && questionDef.select === "many") {
       answer.selected = asArray(saved.selected);
-      answer.added = normalizeAddedItems(saved.added);
+      answer.added = normalizeAddedOptions(saved.added);
       answer.touched = Boolean(answer.selected.length || answer.added.length || Object.keys(answer.comments || {}).length);
     }
 
     if (questionDef.type === "rank") {
-      const known = new Set(questionDef.items.map((entry) => entry.id));
+      const known = new Set(questionDef.options.map((entry) => entry.id));
       answer.order = asArray(saved.order).filter((id) => known.has(id));
-      questionDef.items.forEach((entry) => { if (!answer.order.includes(entry.id)) answer.order.push(entry.id); });
-      answer.touched = Boolean(saved.touched || Object.keys(answer.comments || {}).length || asArray(saved.order).join("|") !== questionDef.items.map((entry) => entry.id).join("|"));
+      questionDef.options.forEach((entry) => { if (!answer.order.includes(entry.id)) answer.order.push(entry.id); });
+      answer.touched = Boolean(saved.touched || Object.keys(answer.comments || {}).length || asArray(saved.order).join("|") !== questionDef.options.map((entry) => entry.id).join("|"));
     }
 
-    if (questionDef.type === "sort") {
+    if (questionDef.type === "bucket") {
       answer.buckets = Object.assign({}, initial.buckets, safeObject(saved.buckets));
       answer.touched = Boolean(Object.values(answer.buckets).some(Boolean) || Object.keys(answer.comments || {}).length);
     }
 
-    if (questionDef.type === "review") {
+    if (questionDef.type === "classify") {
       answer.states = Object.assign({}, initial.states, safeObject(saved.states));
       answer.edits = Object.assign({}, initial.edits, safeObject(saved.edits));
-      answer.added = normalizeAddedItems(saved.added);
+      answer.added = normalizeAddedOptions(saved.added);
       answer.added.forEach((entry) => {
         if (answer.edits[entry.id] === undefined) answer.edits[entry.id] = entry.title;
       });
@@ -264,11 +280,11 @@
         answer.added.length ||
         Object.values(answer.states).some(Boolean) ||
         Object.keys(answer.comments || {}).length ||
-        questionDef.items.some((entry) => answer.edits[entry.id] && answer.edits[entry.id] !== entry.title)
+        questionDef.options.some((entry) => answer.edits[entry.id] && answer.edits[entry.id] !== entry.title)
       );
     }
 
-    if (questionDef.type === "revise") {
+    if (questionDef.type === "edit") {
       answer.summary = String(saved.summary || "");
       answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
     }
@@ -298,53 +314,50 @@
 
     if (questionDef.type === "text") return Object.assign(base, { answer: answer.answer || "" });
 
-    if (questionDef.type === "one") {
-      const comments = itemComments(answerItems(questionDef, answer), answer.comments);
+    if (questionDef.type === "choice") {
+      const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
       const payload = {};
-      if (answer.selected) payload.selected = findItem(questionDef, answer, answer.selected);
-      if (comments.length) payload.comments = comments;
-      return Object.assign(base, payload);
-    }
-
-    if (questionDef.type === "many") {
-      const items = answerItems(questionDef, answer);
-      const selected = asArray(answer.selected).map((id) => findItem(questionDef, answer, id)).filter(Boolean);
-      const added = asArray(answer.added)
-        .filter((entry) => entry.title || asArray(answer.selected).includes(entry.id) || answer.comments && answer.comments[entry.id])
-        .map((entry) => {
-          const payload = {
-            id: entry.id,
-            title: entry.title,
-            selected: asArray(answer.selected).includes(entry.id)
-          };
-          const comment = answer.comments && answer.comments[entry.id] || "";
-          if (comment) payload.comment = comment;
-          return payload;
-        });
-      const comments = itemComments(items, answer.comments);
-      const payload = {};
-      if (selected.length) payload.selected = selected;
-      if (added.length) payload.added = added;
+      payload.select = questionDef.select;
+      if (questionDef.select === "many") {
+        const selectedIds = asArray(answer.selected);
+        const selected = selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
+        const added = asArray(answer.added)
+          .filter((entry) => entry.title || selectedIds.includes(entry.id) || answer.comments && answer.comments[entry.id])
+          .map((entry) => {
+            const optionPayload = {
+              id: entry.id,
+              title: entry.title,
+              selected: selectedIds.includes(entry.id)
+            };
+            const comment = answer.comments && answer.comments[entry.id] || "";
+            if (comment) optionPayload.comment = comment;
+            return optionPayload;
+          });
+        if (selected.length) payload.selected = selected;
+        if (added.length) payload.added = added;
+      } else if (answer.selected) {
+        payload.selected = findOption(questionDef, answer, answer.selected);
+      }
       if (comments.length) payload.comments = comments;
       return Object.assign(base, payload);
     }
 
     if (questionDef.type === "rank") {
-      const defaultOrder = questionDef.items.map((entry) => entry.id);
+      const defaultOrder = questionDef.options.map((entry) => entry.id);
       const order = asArray(answer.order);
       const orderChanged = order.join("|") !== defaultOrder.join("|");
-      const comments = itemComments(answerItems(questionDef, answer), answer.comments);
+      const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
       const payload = {};
-      if (orderChanged) payload.order = order.map((id) => findItem(questionDef, answer, id)).filter(Boolean);
+      if (orderChanged) payload.order = order.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
       if (comments.length) payload.comments = comments;
       return Object.assign(base, payload);
     }
 
-    if (questionDef.type === "sort") {
+    if (questionDef.type === "bucket") {
       const buckets = {};
       questionDef.buckets.forEach((bucket) => { buckets[bucket.title] = []; });
       const unset = [];
-      questionDef.items.forEach((entry) => {
+      questionDef.options.forEach((entry) => {
         const bucket = questionDef.buckets.find((candidate) => candidate.id === answer.buckets[entry.id]);
         const comment = (answer.comments && answer.comments[entry.id]) || "";
         const payload = { id: entry.id, title: entry.title };
@@ -361,10 +374,10 @@
       return Object.assign(base, payload);
     }
 
-    if (questionDef.type === "review") {
-      const items = answerItems(questionDef, answer);
+    if (questionDef.type === "classify") {
+      const options = answerOptions(questionDef, answer);
       return Object.assign(base, {
-        items: items.map((entry) => {
+        options: options.map((entry) => {
           const state = (answer.states && answer.states[entry.id]) || "";
           const edited = (answer.edits && answer.edits[entry.id]) || entry.title;
           const comment = (answer.comments && answer.comments[entry.id]) || "";
@@ -379,7 +392,7 @@
       });
     }
 
-    if (questionDef.type === "revise") {
+    if (questionDef.type === "edit") {
       const output = { summary: answer.summary || "" };
       if (String(answer.content || "") !== artifactText(questionDef.artifact)) output.content = answer.content || "";
       return Object.assign(base, output);
@@ -403,18 +416,14 @@
         lines.push(entry.answer ? entry.answer : "No answer provided.");
       }
 
-      if (entry.type === "one") {
-        if (entry.selected) lines.push(`Selected: ${entry.selected.title}`);
-        appendComments(lines, entry.comments || []);
-      }
-
-      if (entry.type === "many") {
-        if (entry.selected && entry.selected.length) {
+      if (entry.type === "choice") {
+        if (entry.select === "many" && entry.selected && entry.selected.length) {
           lines.push("Selected:");
-          entry.selected.forEach((item) => lines.push(`- ${item.title}`));
+          entry.selected.forEach((option) => lines.push(`- ${option.title}`));
         }
+        if (entry.select === "one" && entry.selected) lines.push(`Selected: ${entry.selected.title}`);
         if (entry.added && entry.added.length) {
-          lines.push("Added custom items:");
+          lines.push("Added custom options:");
           entry.added.forEach((added) => {
             const selected = added.selected ? "selected" : "not selected";
             const comment = added.comment ? ` Comment: ${added.comment}` : "";
@@ -427,18 +436,18 @@
       if (entry.type === "rank") {
         if (entry.order && entry.order.length) {
           lines.push("Order:");
-          entry.order.forEach((item, index) => lines.push(`${index + 1}. ${item.title}`));
+          entry.order.forEach((option, index) => lines.push(`${index + 1}. ${option.title}`));
         }
         appendComments(lines, entry.comments || []);
       }
 
-      if (entry.type === "sort") {
+      if (entry.type === "bucket") {
         Object.keys(entry.buckets || {}).forEach((bucket) => {
           lines.push(`${bucket}:`);
           if (entry.buckets[bucket].length) {
-            entry.buckets[bucket].forEach((item) => {
-              const comment = item.comment ? ` Comment: ${item.comment}` : "";
-              lines.push(`- ${item.title}${comment}`);
+            entry.buckets[bucket].forEach((option) => {
+              const comment = option.comment ? ` Comment: ${option.comment}` : "";
+              lines.push(`- ${option.title}${comment}`);
             });
           } else {
             lines.push("- none");
@@ -446,21 +455,21 @@
         });
         if (entry.unset && entry.unset.length) {
           lines.push("Unsorted:");
-          entry.unset.forEach((item) => lines.push(`- ${item.title}`));
+          entry.unset.forEach((option) => lines.push(`- ${option.title}`));
         }
       }
 
-      if (entry.type === "review") {
-        entry.items.forEach((item) => {
-          const label = item.added || item.title || "Custom item";
+      if (entry.type === "classify") {
+        entry.options.forEach((option) => {
+          const label = option.added || option.title || "Custom option";
           lines.push(`- ${label}`);
-          if (item.state) lines.push(`  State: ${item.state}`);
-          if (item.edited) lines.push(`  Edited: ${item.edited}`);
-          if (item.comment) lines.push(`  Comment: ${item.comment}`);
+          if (option.state) lines.push(`  State: ${option.state}`);
+          if (option.edited) lines.push(`  Edited: ${option.edited}`);
+          if (option.comment) lines.push(`  Comment: ${option.comment}`);
         });
       }
 
-      if (entry.type === "revise") {
+      if (entry.type === "edit") {
         if (entry.content !== undefined) {
           lines.push("Edited artifact:");
           lines.push("```");
@@ -486,31 +495,31 @@
   function isAnswerChanged(questionDef, answer) {
     if (!answer) return false;
     if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
-    if (questionDef.type === "one") return Boolean(answer.selected || itemComments(answerItems(questionDef, answer), answer.comments).length);
-    if (questionDef.type === "many") {
-      return Boolean(asArray(answer.selected).length || asArray(answer.added).length || itemComments(answerItems(questionDef, answer), answer.comments).length);
+    if (questionDef.type === "choice" && questionDef.select === "many") {
+      return Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length);
     }
+    if (questionDef.type === "choice") return Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
     if (questionDef.type === "rank") {
-      const defaultOrder = questionDef.items.map((entry) => entry.id).join("|");
+      const defaultOrder = questionDef.options.map((entry) => entry.id).join("|");
       return Boolean(
         asArray(answer.order).join("|") !== defaultOrder ||
-        itemComments(questionDef.items, answer.comments).length
+        optionComments(questionDef.options, answer.comments).length
       );
     }
-    if (questionDef.type === "sort") {
+    if (questionDef.type === "bucket") {
       return Boolean(
         Object.values(safeObject(answer.buckets)).some(Boolean) ||
-        itemComments(questionDef.items, answer.comments).length
+        optionComments(questionDef.options, answer.comments).length
       );
     }
-    if (questionDef.type === "review") {
-      return answerItems(questionDef, answer).some((entry) => {
+    if (questionDef.type === "classify") {
+      return answerOptions(questionDef, answer).some((entry) => {
         const edited = answer.edits && answer.edits[entry.id] || entry.title;
         const state = answer.states && answer.states[entry.id] || "";
         return Boolean(entry.custom || state || answer.comments && answer.comments[entry.id] || edited !== entry.title);
       });
     }
-    if (questionDef.type === "revise") {
+    if (questionDef.type === "edit") {
       return Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary);
     }
     return false;
@@ -645,10 +654,23 @@
       column-width: var(--ih-choice-column-width);
       column-gap: 14px;
     }
+    .ih-grid[data-cards-per-row] {
+      column-width: auto;
+      display: grid;
+      gap: 14px;
+    }
+    .ih-grid[data-cards-per-row="1"] { grid-template-columns: minmax(0, 1fr); }
+    .ih-grid[data-cards-per-row="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ih-grid[data-cards-per-row="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .ih-grid > .ih-card {
       width: 100%;
       margin: 0 0 14px;
       break-inside: avoid;
+    }
+    .ih-grid[data-cards-per-row] > .ih-card {
+      margin: 0;
+      break-inside: auto;
     }
     .ih-stack { display: grid; gap: 10px; }
     .ih-card {
@@ -669,9 +691,9 @@
     }
     .ih-choice:hover { box-shadow: 0 12px 28px rgb(8 14 13 / 22%); }
     .ih-choice.is-selected { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
-    .ih-item-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
-    .ih-item-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-    .ih-item-title { margin: 0; font-size: clamp(16px, 1.25vw, 20px); line-height: 1.18; letter-spacing: 0; }
+    .ih-option-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+    .ih-option-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .ih-option-title { margin: 0; font-size: clamp(16px, 1.25vw, 20px); line-height: 1.18; letter-spacing: 0; }
     .ih-select-dot, .ih-icon-btn, .ih-comment-button, .ih-move-button, .ih-remove-icon {
       width: 32px;
       height: 32px;
@@ -727,7 +749,7 @@
     }
     .ih-move-option:hover, .ih-move-option.is-current { background: var(--ih-surface-2); }
     .ih-remove-icon { color: var(--ih-danger); }
-    .ih-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ih-tags { display: flex; flex-wrap: wrap; gap: 6px; }
     .ih-pill { border: 0; border-radius: 999px; padding: 4px 8px; color: var(--ih-muted); background: var(--ih-surface-2); font-size: 12px; font-weight: 700; }
     .ih-label { display: block; font-size: 12px; color: var(--ih-muted); font-weight: 760; margin-bottom: 6px; }
     .ih-field {
@@ -773,7 +795,7 @@
     .ih-add-row textarea { min-height: 70px; }
     .ih-add-row .ih-btn { justify-self: start; }
     .ih-compact-list { display: grid; gap: 8px; }
-    .ih-rank-item, .ih-sort-card {
+    .ih-rank-option, .ih-bucket-card {
       display: grid;
       grid-template-columns: 20px minmax(0, 1fr) auto;
       gap: 9px;
@@ -784,16 +806,16 @@
       padding: 9px 10px;
       font-size: 13px;
     }
-    .ih-rank-item .ih-item-title, .ih-sort-card .ih-item-title { font-size: 14px; line-height: 1.25; }
-    .ih-rank-item .ih-rich, .ih-sort-card .ih-rich { font-size: 12px; line-height: 1.35; }
-    .ih-sort-card > .ih-item-title { grid-column: 2; grid-row: 1; align-self: center; }
-    .ih-rank-item > .ih-item-title { grid-column: 2; grid-row: 1; }
-    .ih-sort-card > .ih-sort-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
-    .ih-rank-item > .ih-comment-button { grid-column: 3; grid-row: 1; justify-self: end; }
-    .ih-rank-item > .ih-rich, .ih-sort-card > .ih-rich { grid-column: 1 / -1; grid-row: 2; }
-    .ih-rank-item.is-dragging, .ih-sort-card.is-dragging { opacity: .55; }
-    .ih-rank-item.is-drop-target, .ih-bucket.is-drop-target { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
-    .ih-rank-item { grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; }
+    .ih-rank-option .ih-option-title, .ih-bucket-card .ih-option-title { font-size: 14px; line-height: 1.25; }
+    .ih-rank-option .ih-rich, .ih-bucket-card .ih-rich { font-size: 12px; line-height: 1.35; }
+    .ih-bucket-card > .ih-option-title { grid-column: 2; grid-row: 1; align-self: center; }
+    .ih-rank-option > .ih-option-title { grid-column: 2; grid-row: 1; }
+    .ih-bucket-card > .ih-bucket-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
+    .ih-rank-option > .ih-comment-button { grid-column: 3; grid-row: 1; justify-self: end; }
+    .ih-rank-option > .ih-rich, .ih-bucket-card > .ih-rich { grid-column: 1 / -1; grid-row: 2; }
+    .ih-rank-option.is-dragging, .ih-bucket-card.is-dragging { opacity: .55; }
+    .ih-rank-option.is-drop-target, .ih-bucket.is-drop-target { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
+    .ih-rank-option { grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; }
     .ih-grip {
       width: 18px;
       height: 30px;
@@ -805,16 +827,16 @@
       align-self: center;
     }
     .ih-grip:active { cursor: grabbing; }
-    .ih-sort-frame { --ih-sort-column-width: min(420px, calc(100vw - 64px)); overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
-    .ih-sort-board { display: flex; align-items: stretch; gap: 12px; min-width: max-content; }
-    .ih-bucket { width: var(--ih-sort-column-width); flex: 0 0 var(--ih-sort-column-width); display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    .ih-bucket-frame { --ih-bucket-column-width: min(420px, calc(100vw - 64px)); overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
+    .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: max-content; }
+    .ih-bucket { width: var(--ih-bucket-column-width); flex: 0 0 var(--ih-bucket-column-width); display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
-    .ih-review-card { display: grid; gap: 10px; }
-    .ih-review-row { display: grid; gap: 9px; }
-    .ih-review-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .ih-review-options {
+    .ih-classify-card { display: grid; gap: 10px; }
+    .ih-classify-row { display: grid; gap: 9px; }
+    .ih-classify-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .ih-classify-states {
       display: inline-flex;
       align-items: center;
       flex-wrap: wrap;
@@ -823,8 +845,8 @@
       background: var(--ih-surface-2);
       padding: 4px;
     }
-    .ih-app .ih-review-option, .ih-app .ih-added-pill { font-size: 12px; font-weight: 850; line-height: 1; }
-    .ih-review-option {
+    .ih-app .ih-classify-state, .ih-app .ih-added-pill { font-size: 12px; font-weight: 850; line-height: 1; }
+    .ih-classify-state {
       min-height: 30px;
       border: 0;
       border-radius: 999px;
@@ -834,11 +856,11 @@
       white-space: nowrap;
       transition: background-color .14s ease, color .14s ease, box-shadow .14s ease;
     }
-    .ih-review-option:hover { background: color-mix(in srgb, var(--ih-accent) 14%, var(--ih-surface)); color: var(--ih-ink); }
-    .ih-review-option.is-selected { color: var(--ih-accent-ink); background: var(--ih-accent); box-shadow: 0 1px 4px rgb(8 14 13 / 18%); }
+    .ih-classify-state:hover { background: color-mix(in srgb, var(--ih-accent) 14%, var(--ih-surface)); color: var(--ih-ink); }
+    .ih-classify-state.is-selected { color: var(--ih-accent-ink); background: var(--ih-accent); box-shadow: 0 1px 4px rgb(8 14 13 / 18%); }
     .ih-added-pill { min-height: 30px; border-radius: 999px; display: inline-grid; place-items: center; padding: 0 12px; background: var(--ih-surface-2); color: var(--ih-muted); }
 
-    .ih-revise { display: grid; gap: 10px; }
+    .ih-edit { display: grid; gap: 10px; }
     .ih-code-editor-host, .ih-code-fallback, .ih-code-viewer-host, .ih-code-viewer-fallback {
       min-height: 440px;
       border: 0;
@@ -852,8 +874,8 @@
     .ih-code-editor-host .cm-editor, .ih-code-viewer-host .cm-editor { font-size: 13px; }
     .ih-code-editor-host .cm-scroller, .ih-code-viewer-host .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; }
     .ih-code-fallback { display: block; width: 100%; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; white-space: pre; }
-    [data-revise].has-editor .ih-code-editor-host { display: block; }
-    [data-revise].has-editor .ih-code-fallback { display: none; }
+    [data-edit].has-editor .ih-code-editor-host { display: block; }
+    [data-edit].has-editor .ih-code-fallback { display: none; }
     .ih-code-viewer { display: grid; margin-top: 8px; }
     .ih-code-viewer-host, .ih-code-viewer-fallback { min-height: 0; }
     .ih-code-viewer-host .cm-editor { min-height: 0; }
@@ -881,8 +903,12 @@
       .ih-actions { justify-content: start; }
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
+      .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .ih-pros-cons { grid-template-columns: 1fr; }
       .ih-bottom-inner { align-items: stretch; }
+    }
+    @media (max-width: 680px) {
+      .ih-grid[data-cards-per-row] { grid-template-columns: minmax(0, 1fr); }
     }
   `;
 
@@ -975,12 +1001,11 @@
 
   function renderQuestionBody(questionDef, answer) {
     if (questionDef.type === "text") return renderText(questionDef, answer);
-    if (questionDef.type === "one") return renderChoice(questionDef, answer, false);
-    if (questionDef.type === "many") return renderChoice(questionDef, answer, true);
+    if (questionDef.type === "choice") return renderChoice(questionDef, answer);
     if (questionDef.type === "rank") return renderRank(questionDef, answer);
-    if (questionDef.type === "sort") return renderSort(questionDef, answer);
-    if (questionDef.type === "review") return renderReview(questionDef, answer);
-    if (questionDef.type === "revise") return renderRevise(questionDef, answer);
+    if (questionDef.type === "bucket") return renderBucket(questionDef, answer);
+    if (questionDef.type === "classify") return renderClassify(questionDef, answer);
+    if (questionDef.type === "edit") return renderEdit(questionDef, answer);
     return renderText(questionDef, answer);
   }
 
@@ -993,27 +1018,30 @@
     return `<textarea class="${className}" data-input="text" placeholder="${escapeAttr(questionDef.placeholder || "")}">${escapeHTML(answer.answer || "")}</textarea>`;
   }
 
-  function renderChoice(questionDef, answer, multiple) {
+  function renderChoice(questionDef, answer) {
+    const multiple = questionDef.select === "many";
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
-    const gridClass = questionDef.items.some((entry) => entry.body) ? "ih-grid" : "ih-stack";
-    const items = answerItems(questionDef, answer).map((entry) => renderChoiceItem(entry, answer, selected.includes(entry.id), multiple)).join("");
-    const addRow = multiple ? renderAddRow("Add another item") : "";
-    return `<div class="${gridClass}">${items}</div>${addRow}`;
+    const useGrid = questionDef.cardsPerRow !== "auto" || questionDef.options.some((entry) => entry.body);
+    const gridClass = useGrid ? "ih-grid" : "ih-stack";
+    const layoutAttr = questionDef.cardsPerRow === "auto" ? "" : ` data-cards-per-row="${escapeAttr(questionDef.cardsPerRow)}"`;
+    const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id))).join("");
+    const addRow = multiple ? renderAddRow("Add another option") : "";
+    return `<div class="${gridClass}"${layoutAttr}>${options}</div>${addRow}`;
   }
 
-  function renderChoiceItem(entry, answer, isSelected, multiple) {
-    const action = entry.custom ? "" : ` data-action="${multiple ? "toggle-many" : "select-one"}" tabindex="0"`;
+  function renderChoiceOption(entry, answer, isSelected) {
+    const action = entry.custom ? "" : ` data-action="choose-option" tabindex="0"`;
     return `
-      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-item-id="${escapeAttr(entry.id)}"${action}>
-        <div class="ih-item-top">
-          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-item-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom item text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>`}
-          <div class="ih-item-actions">
-            ${entry.custom ? "" : renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on item")}
-            ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-item-id="${escapeAttr(entry.id)}" aria-label="Remove custom item">${trashIcon()}</button>` : ""}
+      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}"${action}>
+        <div class="ih-option-top">
+          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
+          <div class="ih-option-actions">
+            ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on option")}
+            ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
             ${entry.custom ? "" : `<span class="ih-select-dot">${isSelected ? "✓" : "+"}</span>`}
           </div>
         </div>
-        ${renderMeta(entry.meta)}
+        ${renderTags(entry.tags)}
         ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
       </article>
     `;
@@ -1023,23 +1051,23 @@
     return `
       <div class="ih-card ih-add-row">
         <textarea class="ih-field ih-add-custom ih-auto-field" data-input="add-text" rows="2" placeholder="${escapeAttr(label)}"></textarea>
-        <button class="ih-btn ih-btn-accent" type="button" data-action="add-item">Add item</button>
+        <button class="ih-btn ih-btn-accent" type="button" data-action="add-option">Add option</button>
       </div>
     `;
   }
 
   function renderRank(questionDef, answer) {
-    const order = asArray(answer.order).filter((id) => questionDef.items.some((entry) => entry.id === id));
-    questionDef.items.forEach((entry) => { if (!order.includes(entry.id)) order.push(entry.id); });
+    const order = asArray(answer.order).filter((id) => questionDef.options.some((entry) => entry.id === id));
+    questionDef.options.forEach((entry) => { if (!order.includes(entry.id)) order.push(entry.id); });
     return `
       <div class="ih-rank-list ih-compact-list" data-sortable-rank>
         ${order.map((id) => {
-          const entry = questionDef.items.find((candidate) => candidate.id === id);
+          const entry = questionDef.options.find((candidate) => candidate.id === id);
           return `
-            <article class="ih-rank-item" data-item-id="${escapeAttr(entry.id)}">
+            <article class="ih-rank-option" data-option-id="${escapeAttr(entry.id)}">
               <button class="ih-grip" type="button" aria-label="Drag to reorder"></button>
-              <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-              ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on rank item")}
+              <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
+              ${renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on rank option")}
               ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
             </article>
           `;
@@ -1048,30 +1076,30 @@
     `;
   }
 
-  function renderSort(questionDef, answer) {
+  function renderBucket(questionDef, answer) {
     const byBucket = {};
     questionDef.buckets.forEach((bucket) => { byBucket[bucket.id] = []; });
     const unset = [];
-    questionDef.items.forEach((entry) => {
+    questionDef.options.forEach((entry) => {
       const bucketId = answer.buckets && answer.buckets[entry.id] || "";
       if (byBucket[bucketId]) byBucket[bucketId].push(entry);
       else unset.push(entry);
     });
 
     return `
-      <div class="ih-sort-frame" tabindex="0" aria-label="Sort columns">
-        <div class="ih-sort-board">
+      <div class="ih-bucket-frame" tabindex="0" aria-label="Buckets">
+        <div class="ih-bucket-board">
           <section class="ih-bucket" data-bucket-id="">
             <div class="ih-bucket-title">Unsorted</div>
-            <div class="ih-bucket-list" data-sortable-sort data-bucket-id="">
-              ${unset.length ? unset.map((entry) => renderSortCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Everything is classified</div>`}
+            <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="">
+              ${unset.length ? unset.map((entry) => renderBucketCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Everything is bucketed</div>`}
             </div>
           </section>
           ${questionDef.buckets.map((bucket) => `
             <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
               <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
-              <div class="ih-bucket-list" data-sortable-sort data-bucket-id="${escapeAttr(bucket.id)}">
-                ${byBucket[bucket.id].length ? byBucket[bucket.id].map((entry) => renderSortCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Drop items here</div>`}
+              <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
+                ${byBucket[bucket.id].length ? byBucket[bucket.id].map((entry) => renderBucketCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Drop options here</div>`}
               </div>
             </section>
           `).join("")}
@@ -1080,15 +1108,15 @@
     `;
   }
 
-  function renderSortCard(questionDef, answer, entry) {
+  function renderBucketCard(questionDef, answer, entry) {
     const currentBucketId = answer.buckets && answer.buckets[entry.id] || "";
     return `
-      <article class="ih-sort-card" data-item-id="${escapeAttr(entry.id)}">
+      <article class="ih-bucket-card" data-option-id="${escapeAttr(entry.id)}">
         <button class="ih-grip" type="button" aria-label="Drag to bucket"></button>
-        <h3 class="ih-item-title">${escapeHTML(entry.title)}</h3>
-        <div class="ih-sort-actions">
+        <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
+        <div class="ih-bucket-actions">
           ${renderMoveMenu(questionDef, entry, currentBucketId)}
-          ${renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on sort item")}
+          ${renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on bucket option")}
         </div>
         ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
       </article>
@@ -1099,50 +1127,50 @@
     const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
     return `
       <details class="ih-move-menu">
-        <summary class="ih-move-button" data-action="toggle-move-menu" aria-label="Move sort item" title="Move to column">${moveIcon()}</summary>
-        <div class="ih-move-dropdown" role="menu" aria-label="Move to column">
+        <summary class="ih-move-button" data-action="toggle-move-menu" aria-label="Move bucket option" title="Move to bucket">${moveIcon()}</summary>
+        <div class="ih-move-dropdown" role="menu" aria-label="Move to bucket">
           ${buckets.map((bucket) => {
             const isCurrent = bucket.id === currentBucketId;
-            return `<button class="ih-move-option ${isCurrent ? "is-current" : ""}" type="button" role="menuitem" data-action="move-sort-item" data-item-id="${escapeAttr(entry.id)}" data-bucket-id="${escapeAttr(bucket.id)}" ${isCurrent ? `aria-current="true"` : ""}>${escapeHTML(bucket.title)}</button>`;
+            return `<button class="ih-move-option ${isCurrent ? "is-current" : ""}" type="button" role="menuitem" data-action="move-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-bucket-id="${escapeAttr(bucket.id)}" ${isCurrent ? `aria-current="true"` : ""}>${escapeHTML(bucket.title)}</button>`;
           }).join("")}
         </div>
       </details>
     `;
   }
 
-  function renderReview(questionDef, answer) {
+  function renderClassify(questionDef, answer) {
     return `
       <div class="ih-stack">
-        ${answerItems(questionDef, answer).map((entry) => `
-          <article class="ih-card ih-review-card">
-            <div class="ih-review-row" data-item-id="${escapeAttr(entry.id)}">
-              <div class="ih-review-top">
-                ${entry.custom ? renderAddedPill() : renderReviewOptions(questionDef, answer, entry)}
-                <div class="ih-item-actions">
-                  ${entry.custom ? "" : renderCommentButton("item-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on reviewed item")}
-                  ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-item-id="${escapeAttr(entry.id)}" aria-label="Remove custom item">${trashIcon()}</button>` : ""}
+        ${answerOptions(questionDef, answer).map((entry) => `
+          <article class="ih-card ih-classify-card">
+            <div class="ih-classify-row" data-option-id="${escapeAttr(entry.id)}">
+              <div class="ih-classify-top">
+                ${entry.custom ? renderAddedPill() : renderClassifyStates(questionDef, answer, entry)}
+                <div class="ih-option-actions">
+                  ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on classified option")}
+                  ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
                 </div>
               </div>
-              <textarea class="ih-field ih-auto-field" data-input="review-edit" data-item-id="${escapeAttr(entry.id)}" rows="1">${escapeHTML(answer.edits && answer.edits[entry.id] || entry.title)}</textarea>
+              <textarea class="ih-field ih-auto-field" data-input="classify-edit" data-option-id="${escapeAttr(entry.id)}" rows="1">${escapeHTML(answer.edits && answer.edits[entry.id] || entry.title)}</textarea>
               ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
             </div>
           </article>
         `).join("")}
       </div>
-      ${renderAddRow("Add another statement or term")}
+      ${renderAddRow("Add another option")}
     `;
   }
 
-  function renderRevise(questionDef, answer) {
+  function renderEdit(questionDef, answer) {
     return `
-      <div class="ih-revise">
-        <div class="ih-card" data-revise>
-          <div class="ih-item-top">
+      <div class="ih-edit">
+        <div class="ih-card" data-edit>
+          <div class="ih-option-top">
             <label class="ih-label">Editable artifact</label>
-            ${renderCommentButton("revise-summary", "", answer.summary || "", "Comment on edited artifact")}
+            ${renderCommentButton("edit-summary", "", answer.summary || "", "Comment on edited artifact")}
           </div>
           <div class="ih-code-editor-host" data-code-editor data-lang="${escapeAttr(questionDef.artifact && questionDef.artifact.lang || questionDef.language || "")}"></div>
-          <textarea class="ih-code-fallback ih-auto-field" data-input="revise-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
+          <textarea class="ih-code-fallback ih-auto-field" data-input="edit-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
           <div class="ih-editor-loading" data-editor-loading>Loading syntax editor...</div>
         </div>
       </div>
@@ -1163,15 +1191,15 @@
         </div>
         <div class="ih-export">
           <div class="ih-card">
-            <div class="ih-item-top" style="margin-bottom:12px">
-              <h3 class="ih-item-title">Text</h3>
+            <div class="ih-option-top" style="margin-bottom:12px">
+              <h3 class="ih-option-title">Text</h3>
               <button class="ih-btn ih-btn-primary" type="button" data-action="copy-text">${escapeHTML(instance.config.copyTextLabel)}</button>
             </div>
             <pre class="ih-output" data-export-text>${escapeHTML(text)}</pre>
           </div>
           <div class="ih-card">
-            <div class="ih-item-top" style="margin-bottom:12px">
-              <h3 class="ih-item-title">JSON</h3>
+            <div class="ih-option-top" style="margin-bottom:12px">
+              <h3 class="ih-option-title">JSON</h3>
               <button class="ih-btn" type="button" data-action="copy-json">${escapeHTML(instance.config.copyJsonLabel)}</button>
             </div>
             <pre class="ih-output" data-export-json>${escapeHTML(json)}</pre>
@@ -1189,9 +1217,11 @@
       const height = value.height ? ` style="height:${escapeAttr(value.height)}"` : "";
       const title = value.title || value.src || "Preview";
       const sourceName = value.fileName || value.filename || frameSourceName(value.src) || title;
-      const openButton = value.src && !value.srcdoc
+      const openButton = value.src
         ? `<a class="ih-frame-open" href="${escapeAttr(value.src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>`
-        : "";
+        : value.srcdoc
+          ? `<a class="ih-frame-open" href="about:blank" target="_blank" rel="noopener" data-frame-srcdoc="${escapeAttr(value.srcdoc)}" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>`
+          : "";
       const bar = `
         <div class="ih-frame-bar">
           <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
@@ -1228,25 +1258,25 @@
     `;
   }
 
-  function renderList(items) {
-    const values = asArray(items);
+  function renderList(entries) {
+    const values = asArray(entries);
     if (!values.length) return "";
     return `<ul>${values.map((entry) => `<li>${escapeHTML(valueToText(entry))}</li>`).join("")}</ul>`;
   }
 
-  function renderMeta(meta) {
-    const values = Array.isArray(meta) ? meta : [];
+  function renderTags(tags) {
+    const values = Array.isArray(tags) ? tags : [];
     if (!values.length) return "";
-    return `<div class="ih-meta">${values.map((entry) => `<span class="ih-pill">${escapeHTML(valueToText(entry))}</span>`).join("")}</div>`;
+    return `<div class="ih-tags">${values.map((entry) => `<span class="ih-pill">${escapeHTML(valueToText(entry))}</span>`).join("")}</div>`;
   }
 
-  function renderReviewOptions(questionDef, answer, entry) {
+  function renderClassifyStates(questionDef, answer, entry) {
     const selected = answer.states && answer.states[entry.id] || "";
     return `
-      <div class="ih-review-options" role="radiogroup" aria-label="Review state for ${escapeAttr(entry.title)}">
-        ${questionDef.verbs.map((verb) => {
-          const isSelected = selected === verb.id;
-          return `<button class="ih-review-option ${isSelected ? "is-selected" : ""}" role="radio" aria-checked="${isSelected ? "true" : "false"}" type="button" data-action="review-state" data-item-id="${escapeAttr(entry.id)}" data-review-state="${escapeAttr(verb.id)}">${escapeHTML(verb.title)}</button>`;
+      <div class="ih-classify-states" role="radiogroup" aria-label="Classify state for ${escapeAttr(entry.title)}">
+        ${questionDef.states.map((state) => {
+          const isSelected = selected === state.id;
+          return `<button class="ih-classify-state ${isSelected ? "is-selected" : ""}" role="radio" aria-checked="${isSelected ? "true" : "false"}" type="button" data-action="classify-state" data-option-id="${escapeAttr(entry.id)}" data-classify-state="${escapeAttr(state.id)}">${escapeHTML(state.title)}</button>`;
         }).join("")}
       </div>
     `;
@@ -1256,10 +1286,10 @@
     return `<span class="ih-added-pill">added</span>`;
   }
 
-  function renderCommentButton(kind, itemId, value, label) {
+  function renderCommentButton(kind, optionId, value, label) {
     const filled = Boolean(String(value || "").trim());
-    const itemAttr = itemId ? ` data-item-id="${escapeAttr(itemId)}"` : "";
-    return `<button class="ih-comment-button ${filled ? "has-comment" : ""}" type="button" data-action="open-comment" data-comment-kind="${escapeAttr(kind)}"${itemAttr} aria-label="${escapeAttr(label || "Comment")}" title="${escapeAttr(label || "Comment")}">${commentIcon()}</button>`;
+    const optionAttr = optionId ? ` data-option-id="${escapeAttr(optionId)}"` : "";
+    return `<button class="ih-comment-button ${filled ? "has-comment" : ""}" type="button" data-action="open-comment" data-comment-kind="${escapeAttr(kind)}"${optionAttr} aria-label="${escapeAttr(label || "Comment")}" title="${escapeAttr(label || "Comment")}">${commentIcon()}</button>`;
   }
 
   function renderCommentPopover(instance) {
@@ -1267,7 +1297,7 @@
     if (!editor) return "";
     const context = instance.contextByQuestionId(editor.questionId);
     if (!context) return "";
-    const value = getCommentValue(context.answer, editor.kind, editor.itemId);
+    const value = getCommentValue(context.answer, editor.kind, editor.optionId);
     return `
       <div class="ih-comment-popover-backdrop" data-action="close-comment">
         <section class="ih-comment-popover" role="dialog" aria-modal="true" aria-label="Comment editor" data-action="keep-comment-open">
@@ -1297,21 +1327,21 @@
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`;
   }
 
-  function getCommentValue(answer, kind, itemId) {
+  function getCommentValue(answer, kind, optionId) {
     if (!answer) return "";
-    if (kind === "revise-summary") return answer.summary || "";
-    return answer.comments && answer.comments[itemId] || "";
+    if (kind === "edit-summary") return answer.summary || "";
+    return answer.comments && answer.comments[optionId] || "";
   }
 
-  function setCommentValue(answer, kind, itemId, value) {
+  function setCommentValue(answer, kind, optionId, value) {
     const textValue = String(value || "");
-    if (kind === "revise-summary") {
+    if (kind === "edit-summary") {
       answer.summary = textValue;
       return;
     }
     if (!answer.comments) answer.comments = {};
-    if (textValue.trim()) answer.comments[itemId] = textValue;
-    else delete answer.comments[itemId];
+    if (textValue.trim()) answer.comments[optionId] = textValue;
+    else delete answer.comments[optionId];
   }
 
   // App runtime --------------------------------------------------------------
@@ -1326,6 +1356,7 @@
       this.chromeFrame = null;
       this.sortables = [];
       this.codeEditors = [];
+      this.frameObjectUrls = [];
       this.exportTimer = null;
       this.toastTimer = null;
       this.load();
@@ -1356,6 +1387,7 @@
       requestAnimationFrame(() => {
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
         this.syncRankDom();
+        this.initFrameLinks();
         this.initSortables();
         this.initCodeEditors();
         const comment = this.root.querySelector("[data-input='comment-modal']");
@@ -1404,7 +1436,7 @@
       const actionEl = event.target.closest("[data-action]");
       if (!actionEl || !this.root.contains(actionEl)) return;
       const action = actionEl.dataset.action;
-      if (["select-one", "toggle-many"].includes(action) && isFormControl(event.target)) return;
+      if (action === "choose-option" && isFormControl(event.target)) return;
 
       if (action === "back") return this.go(-1);
       if (action === "next") return this.go(1);
@@ -1423,12 +1455,11 @@
 
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
-      if (action === "select-one") return this.selectOne(actionEl.dataset.itemId, context);
-      if (action === "toggle-many") return this.toggleMany(actionEl.dataset.itemId, context);
-      if (action === "review-state") return this.setReviewState(actionEl.dataset.itemId, actionEl.dataset.reviewState, context);
-      if (action === "move-sort-item") return this.moveSortItem(actionEl, context);
-      if (action === "add-item") return this.addItem(context);
-      if (action === "remove-added") return this.removeAdded(actionEl.dataset.itemId || numberOr(actionEl.dataset.addedIndex, -1), context);
+      if (action === "choose-option") return this.chooseOption(actionEl.dataset.optionId, context);
+      if (action === "classify-state") return this.setClassifyState(actionEl.dataset.optionId, actionEl.dataset.classifyState, context);
+      if (action === "move-bucket-option") return this.moveBucketOption(actionEl, context);
+      if (action === "add-option") return this.addOption(context);
+      if (action === "remove-added") return this.removeAdded(actionEl.dataset.optionId || numberOr(actionEl.dataset.addedIndex, -1), context);
     }
 
     onInput(event) {
@@ -1449,12 +1480,12 @@
 
       if (kind === "text") answer.answer = input.value;
       if (kind === "comment-modal" && this.state.commentEditor) {
-        setCommentValue(answer, this.state.commentEditor.kind, this.state.commentEditor.itemId, input.value);
+        setCommentValue(answer, this.state.commentEditor.kind, this.state.commentEditor.optionId, input.value);
         this.syncOpenCommentButton();
       }
-      if (kind === "review-edit") answer.edits[input.dataset.itemId] = input.value;
-      if (kind === "added-title") this.updateAddedTitle(input.dataset.itemId, input.value, context);
-      if (kind === "revise-content") answer.content = input.value;
+      if (kind === "classify-edit") answer.edits[input.dataset.optionId] = input.value;
+      if (kind === "added-title") this.updateAddedTitle(input.dataset.optionId, input.value, context);
+      if (kind === "edit-content") answer.content = input.value;
 
       answer.touched = true;
       autoGrowTextarea(input);
@@ -1527,8 +1558,8 @@
       this.activateContext(context);
       this.state.commentEditor = {
         questionId: context.questionDef.id,
-        kind: button.dataset.commentKind || "item-comment",
-        itemId: button.dataset.itemId || ""
+        kind: button.dataset.commentKind || "option-comment",
+        optionId: button.dataset.optionId || ""
       };
       this.save();
       this.render();
@@ -1547,7 +1578,7 @@
       const section = this.sectionForContext(context);
       if (!context || !section) return;
       section.querySelectorAll("[data-action='open-comment']").forEach((button) => {
-        const value = getCommentValue(context.answer, button.dataset.commentKind, button.dataset.itemId || "");
+        const value = getCommentValue(context.answer, button.dataset.commentKind, button.dataset.optionId || "");
         button.classList.toggle("has-comment", Boolean(String(value || "").trim()));
       });
     }
@@ -1561,10 +1592,29 @@
         try { view.destroy(); } catch (_) {}
       });
       this.codeEditors = [];
+      this.frameObjectUrls.forEach((url) => {
+        try { global.URL.revokeObjectURL(url); } catch (_) {}
+      });
+      this.frameObjectUrls = [];
+    }
+
+    initFrameLinks() {
+      this.root.querySelectorAll("[data-frame-srcdoc]").forEach((link) => {
+        const srcdoc = link.dataset.frameSrcdoc || "";
+        if (!srcdoc) return;
+        let url = "";
+        try {
+          if (global.Blob && global.URL && global.URL.createObjectURL) {
+            url = global.URL.createObjectURL(new global.Blob([srcdoc], { type: "text/html;charset=utf-8" }));
+            this.frameObjectUrls.push(url);
+          }
+        } catch (_) {}
+        link.href = url || `data:text/html;charset=utf-8,${encodeURIComponent(srcdoc)}`;
+      });
     }
 
     initSortables() {
-      const lists = Array.from(this.root.querySelectorAll("[data-sortable-rank], [data-sortable-sort]"));
+      const lists = Array.from(this.root.querySelectorAll("[data-sortable-rank], [data-sortable-bucket]"));
       if (!lists.length) return;
       ensureSortable().then((Sortable) => {
         lists.forEach((list) => {
@@ -1580,18 +1630,18 @@
           };
           if (list.matches("[data-sortable-rank]") && context.questionDef.type === "rank") {
             const sortable = new Sortable(list, Object.assign({}, common, {
-              draggable: ".ih-rank-item",
+              draggable: ".ih-rank-option",
               onEnd: () => this.updateRankFromDom(list, context)
             }));
             list.dataset.sortableReady = "true";
             this.sortables.push(sortable);
           }
-          if (list.matches("[data-sortable-sort]") && context.questionDef.type === "sort") {
+          if (list.matches("[data-sortable-bucket]") && context.questionDef.type === "bucket") {
             const sortable = new Sortable(list, Object.assign({}, common, {
-              group: `ih-sort-${context.questionDef.id}`,
-              draggable: ".ih-sort-card",
+              group: `ih-bucket-${context.questionDef.id}`,
+              draggable: ".ih-bucket-card",
               onStart: () => list.querySelectorAll(".ih-bucket-empty").forEach((empty) => empty.remove()),
-              onEnd: () => this.updateSortFromDom(context)
+              onEnd: () => this.updateBucketFromDom(context)
             }));
             list.dataset.sortableReady = "true";
             this.sortables.push(sortable);
@@ -1604,9 +1654,9 @@
       const hosts = Array.from(this.root.querySelectorAll("[data-code-editor]"));
       hosts.forEach((host) => {
         const context = this.contextFromNode(host);
-        if (!context || context.questionDef.type !== "revise") return;
-        const card = host.closest("[data-revise]");
-        const fallback = card && card.querySelector("[data-input='revise-content']");
+        if (!context || context.questionDef.type !== "edit") return;
+        const card = host.closest("[data-edit]");
+        const fallback = card && card.querySelector("[data-input='edit-content']");
         const loading = card && card.querySelector("[data-editor-loading]");
         loadCodeMirror(host.dataset.lang || "").then(({ EditorView, basicSetup, theme, language }) => {
           if (!host.isConnected) return;
@@ -1669,7 +1719,7 @@
 
     updateRankFromDom(list, context) {
       if (!context || context.questionDef.type !== "rank") return;
-      context.answer.order = Array.from(list.querySelectorAll(".ih-rank-item[data-item-id]")).map((card) => card.dataset.itemId);
+      context.answer.order = Array.from(list.querySelectorAll(".ih-rank-option[data-option-id]")).map((card) => card.dataset.optionId);
       context.answer.touched = true;
       this.activateContext(context);
       this.save();
@@ -1678,28 +1728,36 @@
       this.refreshExport();
     }
 
-    updateSortFromDom(context) {
+    updateBucketFromDom(context) {
       const section = this.sectionForContext(context);
-      if (!context || context.questionDef.type !== "sort" || !section) return;
-      context.questionDef.items.forEach((entry) => { context.answer.buckets[entry.id] = ""; });
+      if (!context || context.questionDef.type !== "bucket" || !section) return;
+      context.questionDef.options.forEach((entry) => { context.answer.buckets[entry.id] = ""; });
       section.querySelectorAll(".ih-bucket-list[data-bucket-id]").forEach((list) => {
         const bucketId = list.dataset.bucketId || "";
-        list.querySelectorAll(".ih-sort-card[data-item-id]").forEach((card) => {
-          context.answer.buckets[card.dataset.itemId] = bucketId;
+        list.querySelectorAll(".ih-bucket-card[data-option-id]").forEach((card) => {
+          context.answer.buckets[card.dataset.optionId] = bucketId;
         });
       });
       context.answer.touched = true;
       this.activateContext(context);
       this.save();
-      this.syncSortDom(context);
+      this.syncBucketDom(context);
       this.refreshChrome();
       this.refreshExport();
     }
 
-    selectOne(itemId, context) {
+    chooseOption(optionId, context) {
       const answer = context && context.answer;
-      if (!answer) return;
-      answer.selected = itemId;
+      const questionDef = context && context.questionDef;
+      if (!answer || !questionDef) return;
+      if (questionDef.select === "many") {
+        const selected = new Set(asArray(answer.selected));
+        if (selected.has(optionId)) selected.delete(optionId);
+        else selected.add(optionId);
+        answer.selected = Array.from(selected);
+      } else {
+        answer.selected = optionId;
+      }
       answer.touched = true;
       this.save();
       this.refreshChoiceState(context);
@@ -1707,30 +1765,16 @@
       this.refreshExport();
     }
 
-    toggleMany(itemId, context) {
+    setClassifyState(optionId, state, context) {
       const answer = context && context.answer;
       if (!answer) return;
-      const selected = new Set(asArray(answer.selected));
-      if (selected.has(itemId)) selected.delete(itemId);
-      else selected.add(itemId);
-      answer.selected = Array.from(selected);
+      answer.states[optionId] = state;
       answer.touched = true;
       this.save();
-      this.refreshChoiceState(context);
-      this.refreshChrome();
-      this.refreshExport();
-    }
-
-    setReviewState(itemId, state, context) {
-      const answer = context && context.answer;
-      if (!answer) return;
-      answer.states[itemId] = state;
-      answer.touched = true;
-      this.save();
-      const row = this.sectionForContext(context) && this.sectionForContext(context).querySelector(`.ih-review-row[data-item-id="${cssEscape(itemId)}"]`);
+      const row = this.sectionForContext(context) && this.sectionForContext(context).querySelector(`.ih-classify-row[data-option-id="${cssEscape(optionId)}"]`);
       if (row) {
-        row.querySelectorAll(".ih-review-option").forEach((button) => {
-          const selected = button.dataset.reviewState === state;
+        row.querySelectorAll(".ih-classify-state").forEach((button) => {
+          const selected = button.dataset.classifyState === state;
           button.classList.toggle("is-selected", selected);
           button.setAttribute("aria-checked", selected ? "true" : "false");
         });
@@ -1739,18 +1783,18 @@
       this.refreshExport();
     }
 
-    addItem(context) {
+    addOption(context) {
       const section = this.sectionForContext(context);
       const input = section && section.querySelector("[data-input='add-text']");
       const title = input && input.value.trim();
-      if (!title) return this.toast("Write the item first.");
+      if (!title) return this.toast("Write the option first.");
       const questionDef = context && context.questionDef;
       const answer = context && context.answer;
       if (!questionDef || !answer) return;
       const id = uniqueAddedId(questionDef, answer, title);
       answer.added.push({ id, title });
-      if (questionDef.type === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
-      if (questionDef.type === "review") answer.edits[id] = title;
+      if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
+      if (questionDef.type === "classify") answer.edits[id] = title;
       answer.touched = true;
       this.save();
       this.render();
@@ -1767,7 +1811,7 @@
       const removed = answer.added[index];
       answer.added.splice(index, 1);
       if (removed) {
-        if (questionDef.type === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
+        if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
         if (answer.comments) delete answer.comments[removed.id];
         if (answer.edits) delete answer.edits[removed.id];
         if (answer.states) delete answer.states[removed.id];
@@ -1777,29 +1821,29 @@
       this.render();
     }
 
-    updateAddedTitle(itemId, title, context) {
+    updateAddedTitle(optionId, title, context) {
       const answer = context && context.answer;
-      const entry = answer && asArray(answer.added).find((candidate) => candidate.id === itemId);
+      const entry = answer && asArray(answer.added).find((candidate) => candidate.id === optionId);
       if (!entry) return;
       entry.title = title;
-      if (answer.edits && answer.edits[itemId] !== undefined) answer.edits[itemId] = title;
+      if (answer.edits && answer.edits[optionId] !== undefined) answer.edits[optionId] = title;
     }
 
-    setSortBucket(itemId, bucketId, context) {
+    setBucket(optionId, bucketId, context) {
       const answer = context && context.answer;
       if (!answer || !answer.buckets) return;
-      answer.buckets[itemId] = bucketId || "";
+      answer.buckets[optionId] = bucketId || "";
       answer.touched = true;
       this.save();
-      this.syncSortDom(context);
+      this.syncBucketDom(context);
       this.refreshChrome();
       this.refreshExport();
     }
 
-    moveSortItem(button, context) {
+    moveBucketOption(button, context) {
       const menu = button.closest(".ih-move-menu");
       if (menu) menu.open = false;
-      this.setSortBucket(button.dataset.itemId, button.dataset.bucketId || "", context);
+      this.setBucket(button.dataset.optionId, button.dataset.bucketId || "", context);
     }
 
     toggleMoveMenu(button) {
@@ -1866,12 +1910,12 @@
     refreshChoiceState(context) {
       const questionDef = context && context.questionDef;
       const answer = context && context.answer;
-      if (!questionDef || !["one", "many"].includes(questionDef.type)) return;
+      if (!questionDef || questionDef.type !== "choice") return;
       const section = this.sectionForContext(context);
       if (!section) return;
-      const selected = questionDef.type === "many" ? asArray(answer.selected) : [answer.selected];
-      section.querySelectorAll(".ih-choice[data-item-id]").forEach((card) => {
-        const isSelected = selected.includes(card.dataset.itemId);
+      const selected = questionDef.select === "many" ? asArray(answer.selected) : [answer.selected];
+      section.querySelectorAll(".ih-choice[data-option-id]").forEach((card) => {
+        const isSelected = selected.includes(card.dataset.optionId);
         card.classList.toggle("is-selected", isSelected);
         const dot = card.querySelector(".ih-select-dot");
         if (dot) dot.textContent = isSelected ? "✓" : "+";
@@ -1893,28 +1937,28 @@
       if (!list) return;
       const order = asArray(answer.order);
       order.forEach((id) => {
-        const card = list.querySelector(`.ih-rank-item[data-item-id="${cssEscape(id)}"]`);
+        const card = list.querySelector(`.ih-rank-option[data-option-id="${cssEscape(id)}"]`);
         if (card) list.appendChild(card);
       });
     }
 
-    syncSortDom(context) {
+    syncBucketDom(context) {
       if (!context) {
         this.config.questions.forEach((questionDef) => {
-          if (questionDef.type === "sort") this.syncSortDom(this.contextByQuestionId(questionDef.id));
+          if (questionDef.type === "bucket") this.syncBucketDom(this.contextByQuestionId(questionDef.id));
         });
         return;
       }
       const questionDef = context.questionDef;
       const answer = context.answer;
-      if (!questionDef || questionDef.type !== "sort") return;
+      if (!questionDef || questionDef.type !== "bucket") return;
       const section = this.sectionForContext(context);
       if (!section) return;
-      section.querySelectorAll(".ih-sort-card[data-item-id]").forEach((card) => {
-        const bucketId = answer.buckets && answer.buckets[card.dataset.itemId] || "";
+      section.querySelectorAll(".ih-bucket-card[data-option-id]").forEach((card) => {
+        const bucketId = answer.buckets && answer.buckets[card.dataset.optionId] || "";
         const bucket = section.querySelector(`.ih-bucket[data-bucket-id="${cssEscape(bucketId)}"] .ih-bucket-list`);
         if (bucket && card.parentElement !== bucket) bucket.appendChild(card);
-        card.querySelectorAll("[data-action='move-sort-item']").forEach((button) => {
+        card.querySelectorAll("[data-action='move-bucket-option']").forEach((button) => {
           const selected = (button.dataset.bucketId || "") === bucketId;
           button.classList.toggle("is-current", selected);
           if (selected) button.setAttribute("aria-current", "true");
@@ -1925,10 +1969,10 @@
         const list = bucket.querySelector(".ih-bucket-list");
         if (!list) return;
         list.querySelectorAll(".ih-bucket-empty").forEach((empty) => empty.remove());
-        if (!list.querySelector(".ih-sort-card")) {
+        if (!list.querySelector(".ih-bucket-card")) {
           const empty = document.createElement("div");
           empty.className = "ih-bucket-empty";
-          empty.textContent = bucket.dataset.bucketId ? "Drop items here" : "Everything is classified";
+          empty.textContent = bucket.dataset.bucketId ? "Drop options here" : "Everything is bucketed";
           list.appendChild(empty);
         }
       });
@@ -2151,50 +2195,50 @@
   function isQuestionAnswered(questionDef, answer) {
     if (!answer) return false;
     if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
-    if (questionDef.type === "one") return Boolean(answer.selected);
-    if (questionDef.type === "many") return asArray(answer.selected).length > 0;
-    if (questionDef.type === "rank") return Boolean(answer.touched) && asArray(answer.order).length >= questionDef.items.length;
-    if (questionDef.type === "sort") {
-      return questionDef.items.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id]));
+    if (questionDef.type === "choice" && questionDef.select === "many") return asArray(answer.selected).length > 0;
+    if (questionDef.type === "choice") return Boolean(answer.selected);
+    if (questionDef.type === "rank") return Boolean(answer.touched) && asArray(answer.order).length >= questionDef.options.length;
+    if (questionDef.type === "bucket") {
+      return questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id]));
     }
-    if (questionDef.type === "review") {
-      return questionDef.items.every((entry) => Boolean(answer.states && answer.states[entry.id]));
+    if (questionDef.type === "classify") {
+      return questionDef.options.every((entry) => Boolean(answer.states && answer.states[entry.id]));
     }
-    if (questionDef.type === "revise") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
+    if (questionDef.type === "edit") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
     return true;
   }
 
-  function answerItems(questionDef, answer) {
-    const items = asArray(questionDef.items).map((entry) => Object.assign({ custom: false }, entry));
-    if (!answer || !answer.added) return items;
-    return items.concat(normalizeAddedItems(answer.added).map((entry) => Object.assign({ body: "", meta: null, custom: true }, entry)));
+  function answerOptions(questionDef, answer) {
+    const options = asArray(questionDef.options).map((entry) => Object.assign({ custom: false }, entry));
+    if (!answer || !answer.added) return options;
+    return options.concat(normalizeAddedOptions(answer.added).map((entry) => Object.assign({ body: "", tags: null, custom: true }, entry)));
   }
 
-  function itemComments(items, comments) {
-    return asArray(items).map((entry) => ({
+  function optionComments(options, comments) {
+    return asArray(options).map((entry) => ({
       id: entry.id,
       title: entry.title,
       comment: comments && comments[entry.id] || ""
     })).filter((entry) => entry.comment);
   }
 
-  function findItem(questionDef, answer, id) {
-    const entry = answerItems(questionDef, answer).find((candidate) => candidate.id === id);
+  function findOption(questionDef, answer, id) {
+    const entry = answerOptions(questionDef, answer).find((candidate) => candidate.id === id);
     return entry ? { id: entry.id, title: entry.title } : null;
   }
 
-  function normalizeAddedItems(input) {
+  function normalizeAddedOptions(input) {
     return asArray(input).map((entry, index) => {
       if (typeof entry === "string") return { id: slugify(entry) || `added-${index + 1}`, title: entry };
       const raw = Object.assign({}, entry || {});
-      const title = String(raw.title || raw.label || raw.name || raw.value || `Added item ${index + 1}`);
+      const title = String(raw.title || raw.label || raw.name || raw.value || `Added option ${index + 1}`);
       return { id: String(raw.id || slugify(title) || `added-${index + 1}`), title };
     });
   }
 
   function uniqueAddedId(questionDef, answer, title) {
     const base = slugify(title) || `added-${Date.now()}`;
-    const used = new Set(answerItems(questionDef, answer).map((entry) => entry.id));
+    const used = new Set(answerOptions(questionDef, answer).map((entry) => entry.id));
     if (!used.has(base)) return base;
     let index = 2;
     while (used.has(`${base}-${index}`)) index += 1;
@@ -2209,9 +2253,9 @@
     return valueToText(artifact);
   }
 
-  function objectFrom(items, value) {
+  function objectFrom(options, value) {
     const output = {};
-    items.forEach((entry) => {
+    options.forEach((entry) => {
       output[entry.id] = value === "title" ? entry.title : value;
     });
     return output;
@@ -2305,13 +2349,12 @@
     version: VERSION,
     mount,
     text,
-    one,
-    many,
+    choice,
     rank,
-    sort,
-    review,
-    revise,
-    item,
+    bucket,
+    classify,
+    edit,
+    option,
     frame,
     html,
     prosCons,

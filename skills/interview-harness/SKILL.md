@@ -1,9 +1,9 @@
 ---
 name: interview-harness
-description: Create rich interactive interviews for users as local standalone HTML files. A helper library takes care of layout, styling, interview state, and output. Allows cards with rich content, syntax highlighting, inline design and layout comparisons, iframe previews, and item comments.
+description: Create rich interactive interviews for users as local standalone HTML files. A helper library takes care of layout, styling, interview state, output, cards, syntax highlighting, iframe previews, and option comments.
 ---
 
-Create one standalone HTML file that the user can open directly in a browser. Reuse this file shape and replace the sample questions with the task-specific interview.
+Create one standalone HTML file that the user can open directly in a browser. Do not read `interview-harness.js`; this skill is the authoring reference.
 
 ```html
 <!doctype html>
@@ -22,69 +22,113 @@ Create one standalone HTML file that the user can open directly in a browser. Re
         title: "Interview title",
         intro: "Short context for the user.",
         questions: [
-          // Freeform text input question.
-          h.text("constraint", "What restaurant constraint should I not break?", {
+          h.text({
+            id: "constraint",
+            prompt: "What restaurant constraint should I not break?",
             multiline: true,
             placeholder: "Walk-ins, phone bookings, table turnover, large parties, deposits, accessibility."
           }),
 
-          // Single-select question; rich choice cards are about 430px wide.
-          h.one("restaurant_type", "What kind of reservation flow is this?", [
-            h.item("small", "Small restaurant with a few tables", [
-              h.html("<div>Keep the flow simple: date, time, party size, contact info.</div>"),
-              h.prosCons(["Fast to build", "Low staff overhead"], ["Less control over edge cases"])
-            ]),
-            h.item("busy", "Busy restaurant with tight table turnover", [
-              h.html("<div>Show limited slots, party-size rules, and clear arrival expectations.</div>"),
-              h.prosCons(["Protects capacity", "Fewer bad bookings"], ["More rules to explain"])
-            ]),
-            h.item("events", "Restaurant with private events and large parties", [
-              h.html("<div>Route large groups to an inquiry instead of instant booking.</div>"),
-              h.prosCons(["Avoids impossible bookings", "Captures special requests"], ["Slower confirmation"])
-            ])
-          ]),
+          h.choice({
+            id: "restaurant_type",
+            prompt: "What kind of reservation flow is this?",
+            select: "one",
+            cardsPerRow: 3,
+            options: [
+              h.option({
+                id: "small",
+                title: "Small restaurant with a few tables",
+                body: [
+                  h.html({ markup: "<div>Keep the flow simple: date, time, party size, contact info.</div>" }),
+                  h.prosCons({
+                    pros: ["Fast to build", "Low staff overhead"],
+                    cons: ["Less control over edge cases"]
+                  })
+                ]
+              }),
+              h.option({
+                id: "busy",
+                title: "Busy restaurant with tight table turnover",
+                body: [
+                  h.html({ markup: "<div>Show limited slots, party-size rules, and clear arrival expectations.</div>" }),
+                  h.prosCons({
+                    pros: ["Protects capacity", "Fewer bad bookings"],
+                    cons: ["More rules to explain"]
+                  })
+                ]
+              }),
+              h.option({
+                id: "events",
+                title: "Restaurant with private events and large parties",
+                body: [
+                  h.html({ markup: "<div>Route large groups to an inquiry instead of instant booking.</div>" }),
+                  h.prosCons({
+                    pros: ["Avoids impossible bookings", "Captures special requests"],
+                    cons: ["Slower confirmation"]
+                  })
+                ]
+              })
+            ]
+          }),
 
-          // Multi-select question; users can add custom items.
-          h.many("booking_details", "What should guests provide before confirming?", [
-            h.item("contact", "Name, phone, and email", h.html("<div>Needed for confirmation and changes.</div>")),
-            h.item("occasion", "Occasion or seating preference", h.html("<table><tr><th>Occasion</th><th>Example</th></tr><tr><td>Birthday</td><td>Quiet table</td></tr></table>")),
-            h.item("dietary", "Dietary restrictions", h.html("<div>Useful for tasting menus or limited kitchens.</div>")),
-            h.item("deposit", "Card hold or deposit", h.code("json", "{\"partySize\":8,\"depositRequired\":true}"))
-          ]),
+          h.choice({
+            id: "booking_details",
+            prompt: "What should guests provide before confirming?",
+            select: "many",
+            cardsPerRow: 4,
+            options: [
+              h.option({ id: "contact", title: "Name, phone, and email", body: h.html({ markup: "<div>Needed for confirmation and changes.</div>" }) }),
+              h.option({ id: "occasion", title: "Occasion or seating preference", body: h.html({ markup: "<table><tr><th>Occasion</th><th>Example</th></tr><tr><td>Birthday</td><td>Quiet table</td></tr></table>" }) }),
+              h.option({ id: "dietary", title: "Dietary restrictions", body: h.html({ markup: "<div>Useful for tasting menus or limited kitchens.</div>" }) }),
+              h.option({ id: "deposit", title: "Card hold or deposit", body: h.code({ lang: "json", value: "{\"partySize\":8,\"depositRequired\":true}" }) })
+            ]
+          }),
 
-          // Editable review question; users can edit each term title, choose a state per term, and add new terms.
-          h.review("language", "Classify and edit the terms the reservation page should use.",
-            ["guest-facing", "staff-only", "legacy", "avoid"],
-            [
-              h.item("reservation", "Reservation - Confirmed table at a specific date and time.", h.html("<div>Source: currently used on the public website.</div>")),
-              h.item("booking", "Booking - Alternate word for a reservation.", h.html("<div>Source: appears in confirmation email templates.</div>")),
-              h.item("cover", "Cover - One seated guest in the restaurant.", h.html("<div>Source: comes from the POS and staffing reports.</div>")),
-              h.item("walk_in", "Walk-in - Guest arriving without a reservation.", h.html("<div>Source: used by hosts during service.</div>"))
-          ]),
+          h.classify({
+            id: "language",
+            prompt: "Classify and edit the terms the reservation page should use.",
+            states: ["guest-facing", "staff-only", "legacy", "avoid"],
+            options: [
+              h.option({ id: "reservation", title: "Reservation - Confirmed table at a specific date and time.", body: h.html({ markup: "<div>Source: currently used on the public website.</div>" }) }),
+              h.option({ id: "booking", title: "Booking - Alternate word for a reservation.", body: h.html({ markup: "<div>Source: appears in confirmation email templates.</div>" }) }),
+              h.option({ id: "cover", title: "Cover - One seated guest in the restaurant.", body: h.html({ markup: "<div>Source: comes from the POS and staffing reports.</div>" }) }),
+              h.option({ id: "walk_in", title: "Walk-in - Guest arriving without a reservation.", body: h.html({ markup: "<div>Source: used by hosts during service.</div>" }) })
+            ]
+          }),
 
-          // Bucket sorting question; sort columns are up to about 420px wide.
-          h.sort("policy_timing", "When should these policy decisions be made?",
-            ["decide now", "decide later", "staff can choose", "avoid"],
-            [
-              h.item("cancellations", "Cancellation window", h.html("<div>Affects guest trust and staff planning.</div>")),
-              h.item("large_parties", "Large-party cutoff"),
-              h.item("table_map", "Exact table assignment"),
-              h.item("colors", "Exact button colors")
-          ]),
+          h.bucket({
+            id: "policy_timing",
+            prompt: "When should these policy decisions be made?",
+            buckets: ["decide now", "decide later", "staff can choose", "avoid"],
+            options: [
+              h.option({ id: "cancellations", title: "Cancellation window", body: h.html({ markup: "<div>Affects guest trust and staff planning.</div>" }) }),
+              "Large-party cutoff",
+              "Exact table assignment",
+              "Exact button colors"
+            ]
+          }),
 
-          // Rank order question; rank cards are compact full-width rows.
-          h.rank("tradeoffs", "If tradeoffs conflict, what matters most?", [
-            "Guest booking speed",
-            "Avoiding overbooking",
-            "Capturing special requests",
-            "Keeping staff workflow simple"
-          ]),
+          h.rank({
+            id: "tradeoffs",
+            prompt: "If tradeoffs conflict, what matters most?",
+            options: [
+              "Guest booking speed",
+              "Avoiding overbooking",
+              "Capturing special requests",
+              "Keeping staff workflow simple"
+            ]
+          }),
 
-          // Editable artifact question with syntax highlighting.
-          h.revise("confirmation_policy", "Edit this confirmation policy until it is safe to show guests.",
-            h.code("md", `Your table is held for 15 minutes after the reservation time.
+          h.edit({
+            id: "confirmation_policy",
+            prompt: "Edit this confirmation policy until it is safe to show guests.",
+            artifact: h.code({
+              lang: "md",
+              value: `Your table is held for 15 minutes after the reservation time.
 For parties of 8 or more, the restaurant may call to confirm details.
-Please call the restaurant if your party size changes.`))
+Please call the restaurant if your party size changes.`
+            })
+          })
         ]
       });
     </script>
@@ -92,30 +136,37 @@ Please call the restaurant if your party size changes.`))
 </html>
 ```
 
+## Question Helpers
+
+- `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text. `multiline` defaults to `true`.
+- `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection. `select` is `"one"` or `"many"`. Users can add custom options when `select` is `"many"`.
+- `h.rank({ id, prompt, options })`: drag options into priority order.
+- `h.bucket({ id, prompt, buckets, options })`: drag options into named buckets.
+- `h.classify({ id, prompt, states, options })`: choose one state per option, edit option text, and add options.
+- `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact.
+
+`cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans. The layout collapses on narrow screens.
+
 ## Content Helpers
 
-- Plain strings are valid items.
-- Use `h.item(id, title, body, options)` when an item needs rich context.
-- Use `h.html("<div>...</div>")` for short trusted HTML.
-- Use `h.frame(src, options)` for an iframe preview. Frames show a compact source-file header and a new-tab icon button.
-- Use `h.prosCons(pros, cons)` for compact tradeoffs.
-- Use `h.code(lang, value)` for code, prompt, or artifact text.
-- Use `h.revise(id, prompt, artifact, options)` when the user should edit a short code or text artifact.
-- Rich bodies can be arrays.
+- Plain strings are valid options.
+- `h.option({ id, title, body, tags })`: rich option. `tags` is an array of short labels.
+- `h.html({ markup })`: trusted inline HTML.
+- `h.frame({ src, srcdoc, title, fileName, height })`: iframe preview. Use `srcdoc` for inline frames; they still get a new-tab preview button.
+- `h.prosCons({ pros, cons })`: compact tradeoff block.
+- `h.code({ lang, value })`: highlighted code block. Use this as the `artifact` for `h.edit`.
+- Rich option bodies can be arrays.
 
-## How to use?
+## Mount Fields
 
-You can create many questions, types of questions, add rich body parts to each question, but that does not mean you have to. The main goal is to make options clear for the user, allowing them to choose and steer, nothing else.
-User can leave comments, even for items they do not selected, which might allow to avoid uneccessary additional questions.
-Use the rich body context to be more expressive when it makes sense - add layout examples, visual guides, schemas, etc.
-Since it is a local file, you can safely include some visualisation libraries via CDN links for HTML payloads you adding to the questions.
-
-Use only the questions and rich content needed to make the options clear. The goal is to help the user choose, correct, and steer, not to use every available feature.
-Rely on item comments to avoid unnecessary follow-up questions. Users can comment on any item, including items they do not select.
-Use rich item bodies when they make a decision easier: layout examples, visual guides, schemas, tradeoffs, previews, or code snippets.
-Because the interview is a local HTML file, rich HTML payloads may include CDN visualization libraries when they make an option clearer.
+- `title`: page title.
+- `intro`: short context shown under the title.
+- `questions`: question helper outputs.
+- `target`: selector or element for the mount node; omit when using `<div id="interview-harness"></div>`.
+- `storageKey`: local-storage key; set to `false` only when the page should not save progress.
 
 ## Output Behavior
 
-- Users can comment on any item, including items they do not select.
+- Users can comment on any option, including options they do not select.
 - Answers and comments can be exported as text or JSON.
+- Exports include only user-entered or changed answers.

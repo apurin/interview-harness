@@ -25,16 +25,36 @@ Create a local HTML file next to `interview-harness.js`.
     title: "Project direction interview",
     intro: "Short context for the user.",
     questions: [
-      h.text("context", "What should I keep in mind?"),
-      h.one("direction", "Which direction should I continue?", [
-        h.item("dense", "Dense workspace", h.prosCons(
-          ["Fast scanning", "Power-user friendly"],
-          ["Can feel busy"]
-        )),
-        h.item("guided", "Guided setup", h.html("<p>Lower cognitive load, more sequence.</p>"))
-      ]),
-      h.revise("draft", "Edit this draft.",
-        h.code("md", "Write the next implementation prompt."))
+      h.text({
+        id: "context",
+        prompt: "What should I keep in mind?"
+      }),
+      h.choice({
+        id: "direction",
+        prompt: "Which direction should I continue?",
+        select: "one",
+        cardsPerRow: 2,
+        options: [
+          h.option({
+            id: "dense",
+            title: "Dense workspace",
+            body: h.prosCons({
+              pros: ["Fast scanning", "Power-user friendly"],
+              cons: ["Can feel busy"]
+            })
+          }),
+          h.option({
+            id: "guided",
+            title: "Guided setup",
+            body: h.html({ markup: "<p>Lower cognitive load, more sequence.</p>" })
+          })
+        ]
+      }),
+      h.edit({
+        id: "draft",
+        prompt: "Edit this draft.",
+        artifact: h.code({ lang: "md", value: "Write the next implementation prompt." })
+      })
     ]
   });
 </script>
@@ -44,28 +64,27 @@ Open the HTML file in a browser. No build step is required.
 
 ## Question API
 
-- `h.text(id, prompt, options)`: freeform text.
-- `h.one(id, prompt, items, options)`: single choice.
-- `h.many(id, prompt, items, options)`: multiple choice; users can add custom items.
-- `h.rank(id, prompt, items, options)`: drag reorder.
-- `h.sort(id, prompt, buckets, items, options)`: drag items into columns.
-- `h.review(id, prompt, verbs, items, options)`: single-select review states and editable item text; users can add custom items.
-- `h.revise(id, prompt, artifact, options)`: editable code or text artifact.
+- `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text.
+- `h.choice({ id, prompt, select, options, cardsPerRow })`: single or multiple choice. `select` is `"one"` or `"many"`. `cardsPerRow` is `"auto"`, `1`, `2`, `3`, or `4`.
+- `h.rank({ id, prompt, options })`: drag reorder.
+- `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
+- `h.classify({ id, prompt, states, options })`: single-select states and editable option text.
+- `h.edit({ id, prompt, artifact, language })`: editable code or text artifact.
 
 Short interviews show all questions by default. Longer interviews show one question per page. Users can switch views in the page.
 
 ## Rich Content
 
-Plain strings are valid items. Use `h.item(id, title, body, options)` when an option needs richer context.
+Plain strings are valid options. Use `h.option({ id, title, body, tags })` when an option needs richer context.
 
 Rich body helpers:
 
-- `h.html(markup)`: trusted inline HTML.
-- `h.frame(src, options)`: iframe preview with a compact source-file header and a new-tab icon button. Use `srcdoc` in options for inline frames.
-- `h.prosCons(pros, cons)`: compact two-column pros and cons.
-- `h.code(lang, value)`: highlighted code. Revise questions use the same helper for editable artifacts.
+- `h.html({ markup })`: trusted inline HTML.
+- `h.frame({ src, srcdoc, title, fileName, height })`: iframe preview with a compact source-file header and a new-tab icon button. Inline `srcdoc` frames open from a generated preview URL.
+- `h.prosCons({ pros, cons })`: compact two-column pros and cons.
+- `h.code({ lang, value })`: highlighted code. Edit questions use the same helper for editable artifacts.
 
-An item body may be an array, so one option can combine prose, tables, images, pros/cons, frames, and code.
+An option body may be an array, so one option can combine prose, tables, images, pros/cons, frames, and code.
 
 ## Output
 
@@ -73,11 +92,11 @@ The page exposes text and JSON export. Exports include only changed answers and 
 
 - text answers with content
 - selected choices
-- added items
-- changed rank or sort order
-- selected review states
-- edited review text
-- revised content changed from the original artifact
+- added options
+- changed rank or bucket order
+- selected classify states
+- edited classify text
+- edited content changed from the original artifact
 - comments the user wrote
 
 Untouched defaults stay out of the export.
@@ -86,8 +105,8 @@ Untouched defaults stay out of the export.
 
 The library is standalone source, but it loads a few browser-side packages when a question needs them:
 
-- SortableJS `1.15.7` for rank and sort drag controls.
-- CodeMirror `6.0.2` for revise editing and code previews.
+- SortableJS `1.15.7` for rank and bucket drag controls.
+- CodeMirror `6.0.2` for edit questions and code previews.
 - `@codemirror/lang-javascript` `6.2.5`, `@codemirror/lang-markdown` `6.5.0`, `@codemirror/lang-html` `6.4.11`, and `@codemirror/lang-json` `6.0.2` for syntax support.
 - `@codemirror/theme-one-dark` `6.1.3` for a consistent editor theme.
 
