@@ -13,11 +13,11 @@ The output is a temporary HTML artifact. The library carries layout, state, navi
 
 ## Usage
 
-Create a local HTML file next to `interview-harness.js`.
+Create one HTML file that loads the pinned browser library from jsDelivr.
 
 ```html
 <div id="interview-harness"></div>
-<script src="./interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.0/interview-harness.js"></script>
 <script>
   const h = InterviewHarness;
 
@@ -61,6 +61,21 @@ Create a local HTML file next to `interview-harness.js`.
 ```
 
 Open the HTML file in a browser. No build step is required.
+
+## Distribution
+
+Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files.
+
+- Use Git tags as release versions.
+- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.0/interview-harness.js`.
+- Avoid `@main`, omitted versions, and other floating URLs in shared artifacts.
+- Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
+
+Remote skill reference:
+
+```text
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.0/skills/interview-harness-opinionated/SKILL.md
+```
 
 ## Question API
 

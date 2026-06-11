@@ -1,9 +1,9 @@
 ---
 name: interview-harness-opinionated
-description: Create rich interactive interviews for users as local standalone HTML files. A helper library takes care of layout, styling, interview state, output, cards, syntax highlighting, iframe previews, and option comments. Instructs how to structure, pace, and write useful interviews.
+description: Create rich interactive interviews for users as sharable HTML files. A pinned CDN helper library takes care of layout, styling, interview state, output, cards, syntax highlighting, iframe previews, and option comments. Instructs how to structure, pace, and write useful interviews.
 ---
 
-Create one standalone HTML file with an interactive interview that the user can open directly in a browser. Do not read `interview-harness.js`; this skill is the authoring reference.
+Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
 
 ```html
 <!doctype html>
@@ -14,7 +14,7 @@ Create one standalone HTML file with an interactive interview that the user can 
   </head>
   <body>
     <div id="interview-harness"></div>
-    <script src="file:///Users/apurin/Code/interview-harness/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.0/interview-harness.js"></script>
     <script>
       const h = InterviewHarness;
 
@@ -59,17 +59,18 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 
 ## How to Interview
 
-Use only the questions and rich content needed to make the options clear. The goal is to help the user choose, correct, and steer, not to use every available feature.
+Use only the questions and rich content needed to make the options clear. The goal is to help the user choose, correct, and steer, not to use every available feature or question type.
 Start with fundamental questions that can invalidate later questions.
 Prefer a smaller set of high-leverage questions over many questions that become irrelevant after one answer.
-Surface assumptions, important decisions, examples, and tensions.
+Surface assumptions, important decisions, and tensions.
 Unless instructed otherwise, point out the user’s likely bias and propose an alternative they may not have considered.
 Prefer questions that change the next action; omit questions whose answers would not affect the work.
 Offer and mark a strong default when the path is clear, but make the default reviewable.
 Put risky or irreversible decisions before polish questions.
 Rely on option comments to avoid unnecessary follow-up questions. Users can comment on any option, including options they do not select.
-Use rich option bodies when they make a decision easier: layout examples, visual guides, schemas, tradeoffs, previews, or code snippets.
-Because the interview is a local HTML file, rich HTML payloads may include CDN visualization libraries when they make an option clearer.
+Use rich option bodies when they make a decision easier: layout examples, images, visual guides, schemas, tradeoffs, previews, or code snippets.
+Because the interview is an HTML file, rich HTML payloads may include CDN visualization libraries when they make an option clearer.
+Do not force user to make every little decision - aim at the least amount of questions to clarify the most important and especially irreversible decisions as easy and transparently for user as possible.
 
 ## Usage Ideas
 
