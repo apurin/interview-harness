@@ -7,7 +7,6 @@ The output is a temporary HTML artifact. The library carries layout, state, navi
 ## Files
 
 - `interview-harness.js`: the browser library.
-- `all-question-types-interview.html`: local test interview covering each question type.
 - `skills/interview-harness/SKILL.md`: neutral authoring instructions.
 - `skills/interview-harness-opinionated/SKILL.md`: opinionated authoring instructions and examples.
 - `AGENTS.md`: project guidance for agents working in this repository.
