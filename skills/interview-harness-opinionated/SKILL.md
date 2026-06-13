@@ -5,6 +5,8 @@ description: Create rich interactive interviews for users as sharable HTML files
 
 Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
 
+Run `npx skills add apurin/interview-harness --list` to review available interview-harness skills and install one locally.
+
 ```html
 <!doctype html>
 <html>
@@ -14,7 +16,7 @@ Create one sharable HTML file with an interactive interview that the user can op
   </head>
   <body>
     <div id="interview-harness"></div>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.0/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.1/interview-harness.js"></script>
     <script>
       const h = InterviewHarness;
 
@@ -62,8 +64,6 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 Use only the questions and rich content needed to make the options clear. The goal is to help the user choose, correct, and steer, not to use every available feature or question type.
 Start with fundamental questions that can invalidate later questions.
 Prefer a smaller set of high-leverage questions over many questions that become irrelevant after one answer.
-Surface assumptions, important decisions, and tensions.
-Unless instructed otherwise, point out the user’s likely bias and propose an alternative they may not have considered.
 Prefer questions that change the next action; omit questions whose answers would not affect the work.
 Offer and mark a strong default when the path is clear, but make the default reviewable.
 Put risky or irreversible decisions before polish questions.
@@ -77,7 +77,7 @@ Do not force user to make every little decision - aim at the least amount of que
 - Use `classify` to validate ubiquitous language: terms, labels, domain objects, actions, and claims that must mean the same thing to the user and the agent.
 - Use `classify` to collect assumptions in one place and let the user evaluate them.
 - Use `bucket` to separate decisions into “decide now,” “decide later,” and “do not care.”
-- Use `rank` to order success criteria before asking for implementation preferences.
+- Use `rank` when the ordered result itself matters: workflow steps, independent sections, or agenda items.
 - Use `edit` to let the user fine-tune something short and critical.
 - Use `choice` with `cardsPerRow: 1` or `2` for design previews and side-by-side visual comparisons.
 

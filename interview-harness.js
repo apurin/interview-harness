@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "0.1.0";
+  const VERSION = "0.1.1";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
@@ -26,53 +26,47 @@
 
   // Authoring helpers --------------------------------------------------------
 
-  function question(type, config) {
-    return Object.assign({ type }, config || {});
-  }
-
-  function text(config) {
-    return question("text", config);
-  }
-
-  function choice(config) {
-    return question("choice", config);
-  }
-
-  function rank(config) {
-    return question("rank", config);
-  }
-
-  function bucket(config) {
-    return question("bucket", config);
-  }
-
-  function classify(config) {
-    return question("classify", config);
-  }
-
-  function edit(config) {
-    return question("edit", config);
-  }
+  const tagged = (key, value) => (config) => Object.assign({ [key]: value }, config || {});
+  const text = tagged("type", "text");
+  const choice = tagged("type", "choice");
+  const rank = tagged("type", "rank");
+  const bucket = tagged("type", "bucket");
+  const classify = tagged("type", "classify");
+  const edit = tagged("type", "edit");
+  const frame = tagged("view", "frame");
+  const html = tagged("view", "html");
+  const prosCons = tagged("view", "prosCons");
+  const code = tagged("view", "code");
 
   function option(config) {
     return Object.assign({}, config || {});
   }
 
-  function frame(config) {
-    return Object.assign({ view: "frame" }, config || {});
-  }
-
-  function html(config) {
-    return Object.assign({ view: "html" }, config || {});
-  }
-
-  function prosCons(config) {
-    return Object.assign({ view: "prosCons" }, config || {});
-  }
-
-  function code(config) {
-    return Object.assign({ view: "code" }, config || {});
-  }
+  const questionNormalizers = {
+    text: (raw) => ({
+      placeholder: String(raw.placeholder || ""),
+      multiline: raw.multiline !== false,
+      defaultValue: valueToText(raw.defaultValue || raw.value || "")
+    }),
+    choice: (raw) => ({
+      select: normalizeChoiceSelect(raw.select),
+      cardsPerRow: normalizeCardsPerRow(raw.cardsPerRow),
+      options: normalizeOptions(raw.options)
+    }),
+    rank: (raw) => ({ options: normalizeOptions(raw.options) }),
+    bucket: (raw) => ({
+      buckets: normalizeBuckets(raw.buckets || ["yes", "maybe", "no"]),
+      options: normalizeOptions(raw.options)
+    }),
+    classify: (raw) => ({
+      states: normalizeBuckets(raw.states || ["keep", "edit", "remove"]),
+      options: normalizeOptions(raw.options)
+    }),
+    edit: (raw) => ({
+      artifact: normalizeArtifact(raw.artifact || raw.body || raw.content || raw.value || ""),
+      language: raw.language || ""
+    })
+  };
 
   // Normalization ------------------------------------------------------------
 
@@ -103,53 +97,8 @@
     const prompt = String(raw.prompt || raw.question || raw.title || `Question ${index + 1}`);
     const type = String(raw.type || inferQuestionType(raw)).toLowerCase();
     const id = String(raw.id || slugify(prompt) || `q${index + 1}`);
-
-    const base = {
-      type,
-      id,
-      prompt
-    };
-
-    if (type === "text") {
-      return Object.assign(base, {
-        placeholder: String(raw.placeholder || ""),
-        multiline: raw.multiline !== false,
-        defaultValue: valueToText(raw.defaultValue || raw.value || "")
-      });
-    }
-
-    if (type === "choice") {
-      return Object.assign(base, {
-        select: normalizeChoiceSelect(raw.select),
-        cardsPerRow: normalizeCardsPerRow(raw.cardsPerRow),
-        options: normalizeOptions(raw.options)
-      });
-    }
-
-    if (type === "bucket") {
-      return Object.assign(base, {
-        buckets: normalizeBuckets(raw.buckets || ["yes", "maybe", "no"]),
-        options: normalizeOptions(raw.options)
-      });
-    }
-
-    if (type === "classify") {
-      return Object.assign(base, {
-        states: normalizeBuckets(raw.states || ["keep", "edit", "remove"]),
-        options: normalizeOptions(raw.options)
-      });
-    }
-
-    if (type === "edit") {
-      return Object.assign(base, {
-        artifact: normalizeArtifact(raw.artifact || raw.body || raw.content || raw.value || ""),
-        language: raw.language || ""
-      });
-    }
-
-    return Object.assign(base, {
-      options: normalizeOptions(raw.options)
-    });
+    const normalize = questionNormalizers[type] || questionNormalizers.rank;
+    return Object.assign({ type, id, prompt }, normalize(raw));
   }
 
   function inferQuestionType(raw) {
@@ -208,26 +157,65 @@
 
   // State and export logic ---------------------------------------------------
 
+  const initialAnswers = {
+    text: (questionDef) => ({ answer: questionDef.defaultValue || "" }),
+    choice: (questionDef) => questionDef.select === "many"
+      ? { selected: [], comments: {}, added: [] }
+      : { selected: "", comments: {} },
+    rank: (questionDef) => ({ order: optionIds(questionDef.options), comments: {}, touched: false }),
+    bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
+    classify: (questionDef) => ({
+      states: objectFrom(questionDef.options, ""),
+      edits: objectFrom(questionDef.options, "title"),
+      comments: {},
+      added: []
+    }),
+    edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", touched: false })
+  };
+
+  const answerHydrators = {
+    choice(questionDef, answer, saved) {
+      if (questionDef.select !== "many") return;
+      answer.selected = asArray(saved.selected);
+      answer.added = normalizeAddedOptions(saved.added);
+      answer.touched = Boolean(answer.selected.length || answer.added.length || commentCount(answer));
+    },
+    rank(questionDef, answer, saved) {
+      answer.order = orderedKnownIds(saved.order, questionDef.options);
+      answer.touched = Boolean(saved.touched || commentCount(answer) || orderChanged(questionDef, saved.order));
+    },
+    bucket(questionDef, answer, saved, initial) {
+      answer.buckets = Object.assign({}, initial.buckets, safeObject(saved.buckets));
+      answer.touched = Boolean(Object.values(answer.buckets).some(Boolean) || commentCount(answer));
+    },
+    classify(questionDef, answer, saved, initial) {
+      answer.states = Object.assign({}, initial.states, safeObject(saved.states));
+      answer.edits = Object.assign({}, initial.edits, safeObject(saved.edits));
+      answer.added = normalizeAddedOptions(saved.added);
+      answer.added.forEach((entry) => {
+        if (answer.edits[entry.id] === undefined) answer.edits[entry.id] = entry.title;
+      });
+      answer.touched = Boolean(
+        answer.added.length ||
+        Object.values(answer.states).some(Boolean) ||
+        commentCount(answer) ||
+        questionDef.options.some((entry) => answer.edits[entry.id] && answer.edits[entry.id] !== entry.title)
+      );
+    },
+    edit(questionDef, answer, saved) {
+      answer.summary = String(saved.summary || "");
+      answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
+    }
+  };
+
   function createInitialState(questions) {
-    const answers = {};
-    questions.forEach((questionDef) => {
-      answers[questionDef.id] = initialAnswer(questionDef);
-    });
+    const answers = Object.fromEntries(questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
     return { version: VERSION, step: 0, viewMode: "paged", commentEditor: null, answers };
   }
 
   function initialAnswer(questionDef) {
-    if (questionDef.type === "text") return { answer: questionDef.defaultValue || "" };
-    if (questionDef.type === "choice") {
-      return questionDef.select === "many"
-        ? { selected: [], comments: {}, added: [] }
-        : { selected: "", comments: {} };
-    }
-    if (questionDef.type === "rank") return { order: questionDef.options.map((entry) => entry.id), comments: {}, touched: false };
-    if (questionDef.type === "bucket") return { buckets: objectFrom(questionDef.options, ""), comments: {} };
-    if (questionDef.type === "classify") return { states: objectFrom(questionDef.options, ""), edits: objectFrom(questionDef.options, "title"), comments: {}, added: [] };
-    if (questionDef.type === "edit") return { content: artifactText(questionDef.artifact), summary: "", touched: false };
-    return { answer: "" };
+    const build = initialAnswers[questionDef.type];
+    return build ? build(questionDef) : { answer: "" };
   }
 
   function mergeState(saved, current, questions) {
@@ -248,47 +236,11 @@
   }
 
   function hydrateAnswer(questionDef, initial, saved) {
-    const answer = Object.assign({}, initial, saved || {});
-    if (initial.comments) answer.comments = Object.assign({}, initial.comments, safeObject(saved.comments));
-
-    if (questionDef.type === "choice" && questionDef.select === "many") {
-      answer.selected = asArray(saved.selected);
-      answer.added = normalizeAddedOptions(saved.added);
-      answer.touched = Boolean(answer.selected.length || answer.added.length || Object.keys(answer.comments || {}).length);
-    }
-
-    if (questionDef.type === "rank") {
-      const known = new Set(questionDef.options.map((entry) => entry.id));
-      answer.order = asArray(saved.order).filter((id) => known.has(id));
-      questionDef.options.forEach((entry) => { if (!answer.order.includes(entry.id)) answer.order.push(entry.id); });
-      answer.touched = Boolean(saved.touched || Object.keys(answer.comments || {}).length || asArray(saved.order).join("|") !== questionDef.options.map((entry) => entry.id).join("|"));
-    }
-
-    if (questionDef.type === "bucket") {
-      answer.buckets = Object.assign({}, initial.buckets, safeObject(saved.buckets));
-      answer.touched = Boolean(Object.values(answer.buckets).some(Boolean) || Object.keys(answer.comments || {}).length);
-    }
-
-    if (questionDef.type === "classify") {
-      answer.states = Object.assign({}, initial.states, safeObject(saved.states));
-      answer.edits = Object.assign({}, initial.edits, safeObject(saved.edits));
-      answer.added = normalizeAddedOptions(saved.added);
-      answer.added.forEach((entry) => {
-        if (answer.edits[entry.id] === undefined) answer.edits[entry.id] = entry.title;
-      });
-      answer.touched = Boolean(
-        answer.added.length ||
-        Object.values(answer.states).some(Boolean) ||
-        Object.keys(answer.comments || {}).length ||
-        questionDef.options.some((entry) => answer.edits[entry.id] && answer.edits[entry.id] !== entry.title)
-      );
-    }
-
-    if (questionDef.type === "edit") {
-      answer.summary = String(saved.summary || "");
-      answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
-    }
-
+    const savedAnswer = safeObject(saved);
+    const answer = Object.assign({}, initial, savedAnswer);
+    if (initial.comments) answer.comments = Object.assign({}, initial.comments, safeObject(savedAnswer.comments));
+    const hydrate = answerHydrators[questionDef.type];
+    if (hydrate) hydrate(questionDef, answer, savedAnswer, initial);
     return answer;
   }
 
@@ -303,6 +255,15 @@
     };
   }
 
+  const answerSerializers = {
+    text: serializeTextAnswer,
+    choice: serializeChoiceAnswer,
+    rank: serializeRankAnswer,
+    bucket: serializeBucketAnswer,
+    classify: serializeClassifyAnswer,
+    edit: serializeEditAnswer
+  };
+
   function serializeAnswer(questionDef, answer, index) {
     if (!answer || !isAnswerChanged(questionDef, answer)) return null;
     const base = {
@@ -311,95 +272,97 @@
       question: questionDef.prompt,
       position: index + 1
     };
-
-    if (questionDef.type === "text") return Object.assign(base, { answer: answer.answer || "" });
-
-    if (questionDef.type === "choice") {
-      const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
-      const payload = {};
-      payload.select = questionDef.select;
-      if (questionDef.select === "many") {
-        const selectedIds = asArray(answer.selected);
-        const selected = selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
-        const added = asArray(answer.added)
-          .filter((entry) => entry.title || selectedIds.includes(entry.id) || answer.comments && answer.comments[entry.id])
-          .map((entry) => {
-            const optionPayload = {
-              id: entry.id,
-              title: entry.title,
-              selected: selectedIds.includes(entry.id)
-            };
-            const comment = answer.comments && answer.comments[entry.id] || "";
-            if (comment) optionPayload.comment = comment;
-            return optionPayload;
-          });
-        if (selected.length) payload.selected = selected;
-        if (added.length) payload.added = added;
-      } else if (answer.selected) {
-        payload.selected = findOption(questionDef, answer, answer.selected);
-      }
-      if (comments.length) payload.comments = comments;
-      return Object.assign(base, payload);
-    }
-
-    if (questionDef.type === "rank") {
-      const defaultOrder = questionDef.options.map((entry) => entry.id);
-      const order = asArray(answer.order);
-      const orderChanged = order.join("|") !== defaultOrder.join("|");
-      const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
-      const payload = {};
-      if (orderChanged) payload.order = order.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
-      if (comments.length) payload.comments = comments;
-      return Object.assign(base, payload);
-    }
-
-    if (questionDef.type === "bucket") {
-      const buckets = {};
-      questionDef.buckets.forEach((bucket) => { buckets[bucket.title] = []; });
-      const unset = [];
-      questionDef.options.forEach((entry) => {
-        const bucket = questionDef.buckets.find((candidate) => candidate.id === answer.buckets[entry.id]);
-        const comment = (answer.comments && answer.comments[entry.id]) || "";
-        const payload = { id: entry.id, title: entry.title };
-        if (comment) payload.comment = comment;
-        if (bucket) buckets[bucket.title].push(payload);
-        else if (comment) unset.push(payload);
-      });
-      Object.keys(buckets).forEach((bucket) => {
-        if (!buckets[bucket].length) delete buckets[bucket];
-      });
-      const payload = {};
-      if (Object.keys(buckets).length) payload.buckets = buckets;
-      if (unset.length) payload.unset = unset;
-      return Object.assign(base, payload);
-    }
-
-    if (questionDef.type === "classify") {
-      const options = answerOptions(questionDef, answer);
-      return Object.assign(base, {
-        options: options.map((entry) => {
-          const state = (answer.states && answer.states[entry.id]) || "";
-          const edited = (answer.edits && answer.edits[entry.id]) || entry.title;
-          const comment = (answer.comments && answer.comments[entry.id]) || "";
-          if (!entry.custom && !state && !comment && edited === entry.title) return null;
-          const payload = { id: entry.id, title: entry.title };
-          if (entry.custom) payload.added = edited;
-          if (state) payload.state = state;
-          if (!entry.custom && edited !== entry.title) payload.edited = edited;
-          if (comment) payload.comment = comment;
-          return payload;
-        }).filter(Boolean)
-      });
-    }
-
-    if (questionDef.type === "edit") {
-      const output = { summary: answer.summary || "" };
-      if (String(answer.content || "") !== artifactText(questionDef.artifact)) output.content = answer.content || "";
-      return Object.assign(base, output);
-    }
-
-    return Object.assign(base, { answer });
+    const serialize = answerSerializers[questionDef.type];
+    return Object.assign(base, serialize ? serialize(questionDef, answer) : { answer });
   }
+
+  function serializeTextAnswer(_questionDef, answer) {
+    return { answer: answer.answer || "" };
+  }
+
+  function serializeChoiceAnswer(questionDef, answer) {
+    const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
+    const payload = { select: questionDef.select };
+    if (questionDef.select === "many") {
+      const selectedIds = asArray(answer.selected);
+      const selected = selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
+      const added = asArray(answer.added)
+        .filter((entry) => entry.title || selectedIds.includes(entry.id) || optionComment(answer, entry.id))
+        .map((entry) => {
+          const optionPayload = { id: entry.id, title: entry.title, selected: selectedIds.includes(entry.id) };
+          const comment = optionComment(answer, entry.id);
+          if (comment) optionPayload.comment = comment;
+          return optionPayload;
+        });
+      if (selected.length) payload.selected = selected;
+      if (added.length) payload.added = added;
+    } else if (answer.selected) {
+      payload.selected = findOption(questionDef, answer, answer.selected);
+    }
+    if (comments.length) payload.comments = comments;
+    return payload;
+  }
+
+  function serializeRankAnswer(questionDef, answer) {
+    const order = asArray(answer.order);
+    const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
+    const payload = {};
+    if (orderChanged(questionDef, order)) payload.order = order.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
+    if (comments.length) payload.comments = comments;
+    return payload;
+  }
+
+  function serializeBucketAnswer(questionDef, answer) {
+    const buckets = {};
+    questionDef.buckets.forEach((bucket) => { buckets[bucket.title] = []; });
+    const unset = [];
+    questionDef.options.forEach((entry) => {
+      const bucket = questionDef.buckets.find((candidate) => candidate.id === answer.buckets[entry.id]);
+      const comment = optionComment(answer, entry.id);
+      const payload = { id: entry.id, title: entry.title };
+      if (comment) payload.comment = comment;
+      if (bucket) buckets[bucket.title].push(payload);
+      else if (comment) unset.push(payload);
+    });
+    Object.keys(buckets).forEach((bucket) => {
+      if (!buckets[bucket].length) delete buckets[bucket];
+    });
+    const payload = {};
+    if (Object.keys(buckets).length) payload.buckets = buckets;
+    if (unset.length) payload.unset = unset;
+    return payload;
+  }
+
+  function serializeClassifyAnswer(questionDef, answer) {
+    const options = answerOptions(questionDef, answer).map((entry) => {
+      const state = answer.states && answer.states[entry.id] || "";
+      const edited = answer.edits && answer.edits[entry.id] || entry.title;
+      const comment = optionComment(answer, entry.id);
+      if (!entry.custom && !state && !comment && edited === entry.title) return null;
+      const payload = { id: entry.id, title: entry.title };
+      if (entry.custom) payload.added = edited;
+      if (state) payload.state = state;
+      if (!entry.custom && edited !== entry.title) payload.edited = edited;
+      if (comment) payload.comment = comment;
+      return payload;
+    }).filter(Boolean);
+    return { options };
+  }
+
+  function serializeEditAnswer(questionDef, answer) {
+    const output = { summary: answer.summary || "" };
+    if (String(answer.content || "") !== artifactText(questionDef.artifact)) output.content = answer.content || "";
+    return output;
+  }
+
+  const textExporters = {
+    text: appendTextAnswer,
+    choice: appendChoiceAnswer,
+    rank: appendRankAnswer,
+    bucket: appendBucketAnswer,
+    classify: appendClassifyAnswer,
+    edit: appendEditAnswer
+  };
 
   function buildTextExport(config, state) {
     const result = buildResult(config, state);
@@ -411,78 +374,79 @@
 
     result.answers.forEach((entry) => {
       lines.push(`## ${entry.position}. ${entry.question}`);
-
-      if (entry.type === "text") {
-        lines.push(entry.answer ? entry.answer : "No answer provided.");
-      }
-
-      if (entry.type === "choice") {
-        if (entry.select === "many" && entry.selected && entry.selected.length) {
-          lines.push("Selected:");
-          entry.selected.forEach((option) => lines.push(`- ${option.title}`));
-        }
-        if (entry.select === "one" && entry.selected) lines.push(`Selected: ${entry.selected.title}`);
-        if (entry.added && entry.added.length) {
-          lines.push("Added custom options:");
-          entry.added.forEach((added) => {
-            const selected = added.selected ? "selected" : "not selected";
-            const comment = added.comment ? ` Comment: ${added.comment}` : "";
-            lines.push(`- ${added.title || added} (${selected})${comment}`);
-          });
-        }
-        appendComments(lines, entry.comments || []);
-      }
-
-      if (entry.type === "rank") {
-        if (entry.order && entry.order.length) {
-          lines.push("Order:");
-          entry.order.forEach((option, index) => lines.push(`${index + 1}. ${option.title}`));
-        }
-        appendComments(lines, entry.comments || []);
-      }
-
-      if (entry.type === "bucket") {
-        Object.keys(entry.buckets || {}).forEach((bucket) => {
-          lines.push(`${bucket}:`);
-          if (entry.buckets[bucket].length) {
-            entry.buckets[bucket].forEach((option) => {
-              const comment = option.comment ? ` Comment: ${option.comment}` : "";
-              lines.push(`- ${option.title}${comment}`);
-            });
-          } else {
-            lines.push("- none");
-          }
-        });
-        if (entry.unset && entry.unset.length) {
-          lines.push("Unsorted:");
-          entry.unset.forEach((option) => lines.push(`- ${option.title}`));
-        }
-      }
-
-      if (entry.type === "classify") {
-        entry.options.forEach((option) => {
-          const label = option.added || option.title || "Custom option";
-          lines.push(`- ${label}`);
-          if (option.state) lines.push(`  State: ${option.state}`);
-          if (option.edited) lines.push(`  Edited: ${option.edited}`);
-          if (option.comment) lines.push(`  Comment: ${option.comment}`);
-        });
-      }
-
-      if (entry.type === "edit") {
-        if (entry.content !== undefined) {
-          lines.push("Edited artifact:");
-          lines.push("```");
-          lines.push(entry.content || "");
-          lines.push("```");
-        }
-        if (entry.summary) lines.push(`Overall comment: ${entry.summary}`);
-      }
-
+      const append = textExporters[entry.type];
+      if (append) append(lines, entry);
       lines.push("");
     });
 
     return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  }
+
+  function appendTextAnswer(lines, entry) {
+    lines.push(entry.answer ? entry.answer : "No answer provided.");
+  }
+
+  function appendChoiceAnswer(lines, entry) {
+    if (entry.select === "many" && entry.selected && entry.selected.length) {
+      lines.push("Selected:");
+      entry.selected.forEach((option) => lines.push(`- ${option.title}`));
+    }
+    if (entry.select === "one" && entry.selected) lines.push(`Selected: ${entry.selected.title}`);
+    if (entry.added && entry.added.length) {
+      lines.push("Added custom options:");
+      entry.added.forEach((added) => {
+        const selected = added.selected ? "selected" : "not selected";
+        const comment = added.comment ? ` Comment: ${added.comment}` : "";
+        lines.push(`- ${added.title || added} (${selected})${comment}`);
+      });
+    }
+    appendComments(lines, entry.comments || []);
+  }
+
+  function appendRankAnswer(lines, entry) {
+    if (entry.order && entry.order.length) {
+      lines.push("Order:");
+      entry.order.forEach((option, index) => lines.push(`${index + 1}. ${option.title}`));
+    }
+    appendComments(lines, entry.comments || []);
+  }
+
+  function appendBucketAnswer(lines, entry) {
+    Object.keys(entry.buckets || {}).forEach((bucket) => {
+      lines.push(`${bucket}:`);
+      if (entry.buckets[bucket].length) {
+        entry.buckets[bucket].forEach((option) => {
+          const comment = option.comment ? ` Comment: ${option.comment}` : "";
+          lines.push(`- ${option.title}${comment}`);
+        });
+      } else {
+        lines.push("- none");
+      }
+    });
+    if (entry.unset && entry.unset.length) {
+      lines.push("Unsorted:");
+      entry.unset.forEach((option) => lines.push(`- ${option.title}`));
+    }
+  }
+
+  function appendClassifyAnswer(lines, entry) {
+    entry.options.forEach((option) => {
+      const label = option.added || option.title || "Custom option";
+      lines.push(`- ${label}`);
+      if (option.state) lines.push(`  State: ${option.state}`);
+      if (option.edited) lines.push(`  Edited: ${option.edited}`);
+      if (option.comment) lines.push(`  Comment: ${option.comment}`);
+    });
+  }
+
+  function appendEditAnswer(lines, entry) {
+    if (entry.content !== undefined) {
+      lines.push("Edited artifact:");
+      lines.push("```");
+      lines.push(entry.content || "");
+      lines.push("```");
+    }
+    if (entry.summary) lines.push(`Overall comment: ${entry.summary}`);
   }
 
   function appendComments(lines, comments) {
@@ -492,37 +456,31 @@
     filled.forEach((entry) => lines.push(`- ${entry.title}: ${entry.comment}`));
   }
 
-  function isAnswerChanged(questionDef, answer) {
-    if (!answer) return false;
-    if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
-    if (questionDef.type === "choice" && questionDef.select === "many") {
-      return Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length);
-    }
-    if (questionDef.type === "choice") return Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
-    if (questionDef.type === "rank") {
-      const defaultOrder = questionDef.options.map((entry) => entry.id).join("|");
-      return Boolean(
-        asArray(answer.order).join("|") !== defaultOrder ||
-        optionComments(questionDef.options, answer.comments).length
-      );
-    }
-    if (questionDef.type === "bucket") {
-      return Boolean(
-        Object.values(safeObject(answer.buckets)).some(Boolean) ||
-        optionComments(questionDef.options, answer.comments).length
-      );
-    }
-    if (questionDef.type === "classify") {
+  const answerChangeChecks = {
+    text: (_questionDef, answer) => Boolean(String(answer.answer || "").trim()),
+    choice(questionDef, answer) {
+      return questionDef.select === "many"
+        ? Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length)
+        : Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
+    },
+    rank: (questionDef, answer) => Boolean(orderChanged(questionDef, answer.order) || optionComments(questionDef.options, answer.comments).length),
+    bucket: (questionDef, answer) => Boolean(
+      Object.values(safeObject(answer.buckets)).some(Boolean) ||
+      optionComments(questionDef.options, answer.comments).length
+    ),
+    classify(questionDef, answer) {
       return answerOptions(questionDef, answer).some((entry) => {
         const edited = answer.edits && answer.edits[entry.id] || entry.title;
         const state = answer.states && answer.states[entry.id] || "";
-        return Boolean(entry.custom || state || answer.comments && answer.comments[entry.id] || edited !== entry.title);
+        return Boolean(entry.custom || state || optionComment(answer, entry.id) || edited !== entry.title);
       });
-    }
-    if (questionDef.type === "edit") {
-      return Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary);
-    }
-    return false;
+    },
+    edit: (questionDef, answer) => Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary)
+  };
+
+  function isAnswerChanged(questionDef, answer) {
+    const check = answer && answerChangeChecks[questionDef.type];
+    return Boolean(check && check(questionDef, answer));
   }
 
   // Rendering and styles -----------------------------------------------------
@@ -999,14 +957,17 @@
     `;
   }
 
+  const questionRenderers = {
+    text: renderText,
+    choice: renderChoice,
+    rank: renderRank,
+    bucket: renderBucket,
+    classify: renderClassify,
+    edit: renderEdit
+  };
+
   function renderQuestionBody(questionDef, answer) {
-    if (questionDef.type === "text") return renderText(questionDef, answer);
-    if (questionDef.type === "choice") return renderChoice(questionDef, answer);
-    if (questionDef.type === "rank") return renderRank(questionDef, answer);
-    if (questionDef.type === "bucket") return renderBucket(questionDef, answer);
-    if (questionDef.type === "classify") return renderClassify(questionDef, answer);
-    if (questionDef.type === "edit") return renderEdit(questionDef, answer);
-    return renderText(questionDef, answer);
+    return (questionRenderers[questionDef.type] || renderText)(questionDef, answer);
   }
 
   function renderText(questionDef, answer) {
@@ -1036,7 +997,7 @@
         <div class="ih-option-top">
           ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
           <div class="ih-option-actions">
-            ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on option")}
+            ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on option")}
             ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
             ${entry.custom ? "" : `<span class="ih-select-dot">${isSelected ? "✓" : "+"}</span>`}
           </div>
@@ -1067,7 +1028,7 @@
             <article class="ih-rank-option" data-option-id="${escapeAttr(entry.id)}">
               <button class="ih-grip" type="button" aria-label="Drag to reorder"></button>
               <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
-              ${renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on rank option")}
+              ${renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on rank option")}
               ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
             </article>
           `;
@@ -1116,7 +1077,7 @@
         <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
         <div class="ih-bucket-actions">
           ${renderMoveMenu(questionDef, entry, currentBucketId)}
-          ${renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on bucket option")}
+          ${renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on bucket option")}
         </div>
         ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
       </article>
@@ -1147,7 +1108,7 @@
               <div class="ih-classify-top">
                 ${entry.custom ? renderAddedPill() : renderClassifyStates(questionDef, answer, entry)}
                 <div class="ih-option-actions">
-                  ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, answer.comments && answer.comments[entry.id] || "", "Comment on classified option")}
+                  ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on classified option")}
                   ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
                 </div>
               </div>
@@ -1178,8 +1139,8 @@
   }
 
   function renderExportStep(instance) {
-    const text = buildTextExport(instance.config, instance.state);
-    const json = JSON.stringify(buildResult(instance.config, instance.state), null, 2);
+    const text = instance.getText();
+    const json = instance.getJSON();
     return `
       <section class="ih-step" id="ih-output">
         <div class="ih-question-head">
@@ -1330,7 +1291,7 @@
   function getCommentValue(answer, kind, optionId) {
     if (!answer) return "";
     if (kind === "edit-summary") return answer.summary || "";
-    return answer.comments && answer.comments[optionId] || "";
+    return optionComment(answer, optionId);
   }
 
   function setCommentValue(answer, kind, optionId, value) {
@@ -1487,11 +1448,8 @@
       if (kind === "added-title") this.updateAddedTitle(input.dataset.optionId, input.value, context);
       if (kind === "edit-content") answer.content = input.value;
 
-      answer.touched = true;
       autoGrowTextarea(input);
-      this.scheduleSave();
-      this.scheduleExport();
-      this.scheduleChrome();
+      this.markChanged(answer, true);
     }
 
     onKeydown(event) {
@@ -1509,6 +1467,23 @@
     sectionForContext(context) {
       if (!context) return null;
       return this.root.querySelector(`.ih-step[data-question-id="${cssEscape(context.questionDef.id)}"]`);
+    }
+
+    markChanged(answer, deferred) {
+      if (answer) answer.touched = true;
+      if (deferred) {
+        this.scheduleSave();
+        this.scheduleExport();
+        this.scheduleChrome();
+        return;
+      }
+      this.save();
+      this.refreshChrome();
+    }
+
+    saveChanged(answer) {
+      if (answer) answer.touched = true;
+      this.save();
     }
 
     scheduleSave() {
@@ -1651,81 +1626,58 @@
     }
 
     initCodeEditors() {
-      const hosts = Array.from(this.root.querySelectorAll("[data-code-editor]"));
-      hosts.forEach((host) => {
-        const context = this.contextFromNode(host);
-        if (!context || context.questionDef.type !== "edit") return;
-        const card = host.closest("[data-edit]");
-        const fallback = card && card.querySelector("[data-input='edit-content']");
-        const loading = card && card.querySelector("[data-editor-loading]");
-        loadCodeMirror(host.dataset.lang || "").then(({ EditorView, basicSetup, theme, language }) => {
-          if (!host.isConnected) return;
-          const doc = fallback ? fallback.value : context.answer.content || "";
-          context.answer.content = doc;
-          const extensions = [
-            basicSetup,
-            theme,
-            language,
-            EditorView.lineWrapping,
-            EditorView.updateListener.of((update) => {
-              if (!update.docChanged) return;
-              context.answer.content = update.state.doc.toString();
-              context.answer.touched = true;
-              this.scheduleSave();
-              this.scheduleExport();
-              this.scheduleChrome();
-            })
-          ].filter(Boolean);
-          host.textContent = "";
-          host.classList.add("is-ready");
-          if (card) card.classList.add("has-editor");
-          if (loading) loading.remove();
-          const view = new EditorView({
-            doc,
-            extensions,
-            parent: host
-          });
-          this.codeEditors.push(view);
-          if (fallback) fallback.value = doc;
-        }).catch(() => {
-          if (card) card.classList.add("is-fallback");
-          if (host) host.hidden = true;
-          if (loading) loading.textContent = "Syntax editor unavailable; using the plain editor.";
-          if (fallback) autoGrowTextarea(fallback);
-        });
-      });
+      this.root.querySelectorAll("[data-code-editor]").forEach((host) => this.initCodeEditor(host));
+      this.root.querySelectorAll("[data-code-viewer]").forEach((host) => this.initCodeViewer(host));
+    }
 
-      const viewerHosts = Array.from(this.root.querySelectorAll("[data-code-viewer]"));
-      viewerHosts.forEach((host) => {
-        const shell = host.closest("[data-code-viewer-shell]");
-        const fallback = shell && shell.querySelector(".ih-code-viewer-fallback");
-        const doc = fallback ? fallback.textContent || "" : "";
-        loadCodeMirror(host.dataset.lang || "").then(({ EditorView, basicSetup, theme, language }) => {
-          if (!host.isConnected || !shell) return;
-          const extensions = [
-            basicSetup,
-            theme,
-            language,
-            EditorView.lineWrapping,
-            EditorView.editable.of(false)
-          ].filter(Boolean);
-          host.textContent = "";
-          const view = new EditorView({ doc, extensions, parent: host });
-          shell.classList.add("has-editor");
-          this.codeEditors.push(view);
-        }).catch(() => {});
+    initCodeEditor(host) {
+      const context = this.contextFromNode(host);
+      if (!context || context.questionDef.type !== "edit") return;
+      const card = host.closest("[data-edit]");
+      const fallback = card && card.querySelector("[data-input='edit-content']");
+      const loading = card && card.querySelector("[data-editor-loading]");
+      const doc = fallback ? fallback.value : context.answer.content || "";
+      context.answer.content = doc;
+      createCodeMirrorView(host, {
+        doc,
+        lang: host.dataset.lang || "",
+        onChange: (value) => {
+          context.answer.content = value;
+          this.markChanged(context.answer, true);
+        }
+      }).then((view) => {
+        if (!view) return;
+        host.classList.add("is-ready");
+        if (card) card.classList.add("has-editor");
+        if (loading) loading.remove();
+        this.codeEditors.push(view);
+        if (fallback) fallback.value = doc;
+      }).catch(() => {
+        if (card) card.classList.add("is-fallback");
+        if (host) host.hidden = true;
+        if (loading) loading.textContent = "Syntax editor unavailable; using the plain editor.";
+        if (fallback) autoGrowTextarea(fallback);
       });
+    }
+
+    initCodeViewer(host) {
+      const shell = host.closest("[data-code-viewer-shell]");
+      if (!shell) return;
+      const fallback = shell.querySelector(".ih-code-viewer-fallback");
+      const doc = fallback ? fallback.textContent || "" : "";
+      createCodeMirrorView(host, { doc, lang: host.dataset.lang || "", readOnly: true }).then((view) => {
+        if (!view) return;
+        shell.classList.add("has-editor");
+        this.codeEditors.push(view);
+      }).catch(() => {});
     }
 
     updateRankFromDom(list, context) {
       if (!context || context.questionDef.type !== "rank") return;
       context.answer.order = Array.from(list.querySelectorAll(".ih-rank-option[data-option-id]")).map((card) => card.dataset.optionId);
-      context.answer.touched = true;
       this.activateContext(context);
-      this.save();
       this.syncRankDom(context);
-      this.refreshChrome();
-      this.refreshExport();
+      this.markChanged(context.answer);
     }
 
     updateBucketFromDom(context) {
@@ -1738,12 +1690,9 @@
           context.answer.buckets[card.dataset.optionId] = bucketId;
         });
       });
-      context.answer.touched = true;
       this.activateContext(context);
-      this.save();
       this.syncBucketDom(context);
-      this.refreshChrome();
-      this.refreshExport();
+      this.markChanged(context.answer);
     }
 
     chooseOption(optionId, context) {
@@ -1758,19 +1707,14 @@
       } else {
         answer.selected = optionId;
       }
-      answer.touched = true;
-      this.save();
       this.refreshChoiceState(context);
-      this.refreshChrome();
-      this.refreshExport();
+      this.markChanged(answer);
     }
 
     setClassifyState(optionId, state, context) {
       const answer = context && context.answer;
       if (!answer) return;
       answer.states[optionId] = state;
-      answer.touched = true;
-      this.save();
       const row = this.sectionForContext(context) && this.sectionForContext(context).querySelector(`.ih-classify-row[data-option-id="${cssEscape(optionId)}"]`);
       if (row) {
         row.querySelectorAll(".ih-classify-state").forEach((button) => {
@@ -1779,8 +1723,7 @@
           button.setAttribute("aria-checked", selected ? "true" : "false");
         });
       }
-      this.refreshChrome();
-      this.refreshExport();
+      this.markChanged(answer);
     }
 
     addOption(context) {
@@ -1795,8 +1738,7 @@
       answer.added.push({ id, title });
       if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
       if (questionDef.type === "classify") answer.edits[id] = title;
-      answer.touched = true;
-      this.save();
+      this.saveChanged(answer);
       this.render();
     }
 
@@ -1816,8 +1758,7 @@
         if (answer.edits) delete answer.edits[removed.id];
         if (answer.states) delete answer.states[removed.id];
       }
-      answer.touched = true;
-      this.save();
+      this.saveChanged(answer);
       this.render();
     }
 
@@ -1833,11 +1774,8 @@
       const answer = context && context.answer;
       if (!answer || !answer.buckets) return;
       answer.buckets[optionId] = bucketId || "";
-      answer.touched = true;
-      this.save();
       this.syncBucketDom(context);
-      this.refreshChrome();
-      this.refreshExport();
+      this.markChanged(answer);
     }
 
     moveBucketOption(button, context) {
@@ -1990,10 +1928,7 @@
             ].filter(Boolean).join(" ")
           : `ih-timeline-dot ${timelineState(this, this.config.questions[step], step)}`;
       });
-      const textOutput = this.root.querySelector("[data-export-text]");
-      const jsonOutput = this.root.querySelector("[data-export-json]");
-      if (textOutput) textOutput.textContent = this.getText();
-      if (jsonOutput) jsonOutput.textContent = this.getJSON();
+      this.refreshExport();
     }
 
     reset() {
@@ -2102,6 +2037,28 @@
     return { EditorView: codeMirror.EditorView, basicSetup: codeMirror.basicSetup, theme, language };
   }
 
+  async function createCodeMirrorView(host, options) {
+    const { EditorView, basicSetup, theme, language } = await loadCodeMirror(options.lang || "");
+    if (!host.isConnected) return null;
+    host.textContent = "";
+    return new EditorView({
+      doc: options.doc || "",
+      extensions: codeMirrorExtensions(EditorView, basicSetup, theme, language, options),
+      parent: host
+    });
+  }
+
+  function codeMirrorExtensions(EditorView, basicSetup, theme, language, options) {
+    const extensions = [basicSetup, theme, language, EditorView.lineWrapping];
+    if (options.readOnly) extensions.push(EditorView.editable.of(false));
+    if (options.onChange) {
+      extensions.push(EditorView.updateListener.of((update) => {
+        if (update.docChanged) options.onChange(update.state.doc.toString(), update);
+      }));
+    }
+    return extensions.filter(Boolean);
+  }
+
   function normalizeLanguageKey(lang, preserveVariant) {
     const key = String(lang || "")
       .toLowerCase()
@@ -2192,26 +2149,48 @@
     return instance.config.questions.every((questionDef) => isQuestionAnswered(questionDef, instance.state.answers[questionDef.id]));
   }
 
+  const questionAnsweredChecks = {
+    text: (_questionDef, answer) => Boolean(String(answer.answer || "").trim()),
+    choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
+    rank: (questionDef, answer) => Boolean(answer.touched) && asArray(answer.order).length >= questionDef.options.length,
+    bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id])),
+    classify: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.states && answer.states[entry.id])),
+    edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
+  };
+
   function isQuestionAnswered(questionDef, answer) {
     if (!answer) return false;
-    if (questionDef.type === "text") return Boolean(String(answer.answer || "").trim());
-    if (questionDef.type === "choice" && questionDef.select === "many") return asArray(answer.selected).length > 0;
-    if (questionDef.type === "choice") return Boolean(answer.selected);
-    if (questionDef.type === "rank") return Boolean(answer.touched) && asArray(answer.order).length >= questionDef.options.length;
-    if (questionDef.type === "bucket") {
-      return questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id]));
-    }
-    if (questionDef.type === "classify") {
-      return questionDef.options.every((entry) => Boolean(answer.states && answer.states[entry.id]));
-    }
-    if (questionDef.type === "edit") return Boolean(answer.touched) && Boolean(String(answer.content || "").trim());
-    return true;
+    const check = questionAnsweredChecks[questionDef.type];
+    return check ? check(questionDef, answer) : true;
   }
 
   function answerOptions(questionDef, answer) {
     const options = asArray(questionDef.options).map((entry) => Object.assign({ custom: false }, entry));
     if (!answer || !answer.added) return options;
     return options.concat(normalizeAddedOptions(answer.added).map((entry) => Object.assign({ body: "", tags: null, custom: true }, entry)));
+  }
+
+  function optionIds(options) {
+    return asArray(options).map((entry) => entry.id);
+  }
+
+  function orderedKnownIds(order, options) {
+    const known = new Set(optionIds(options));
+    const output = asArray(order).filter((id) => known.has(id));
+    options.forEach((entry) => { if (!output.includes(entry.id)) output.push(entry.id); });
+    return output;
+  }
+
+  function orderChanged(questionDef, order) {
+    return asArray(order).join("|") !== optionIds(questionDef.options).join("|");
+  }
+
+  function optionComment(answer, optionId) {
+    return answer && answer.comments && answer.comments[optionId] || "";
+  }
+
+  function commentCount(answer) {
+    return Object.keys(safeObject(answer && answer.comments)).length;
   }
 
   function optionComments(options, comments) {
@@ -2254,11 +2233,7 @@
   }
 
   function objectFrom(options, value) {
-    const output = {};
-    options.forEach((entry) => {
-      output[entry.id] = value === "title" ? entry.title : value;
-    });
-    return output;
+    return Object.fromEntries(options.map((entry) => [entry.id, value === "title" ? entry.title : value]));
   }
 
   function asArray(value) {
