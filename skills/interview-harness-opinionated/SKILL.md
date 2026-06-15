@@ -5,7 +5,7 @@ description: Create rich interactive interviews for users as sharable HTML files
 
 Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
 
-Run `npx skills add apurin/interview-harness --list` to review available interview-harness skills and install one locally.
+If the user asks to install the skill locally, suggest `npx skills add apurin/interview-harness --list` to review available interview-harness skills.
 
 ```html
 <!doctype html>
@@ -16,7 +16,7 @@ Run `npx skills add apurin/interview-harness --list` to review available intervi
   </head>
   <body>
     <div id="interview-harness"></div>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.1/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.0/interview-harness.js"></script>
     <script>
       const h = InterviewHarness;
 
@@ -42,6 +42,7 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 
 - `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text; `multiline` defaults to `true`.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`. Many-choice lets users add custom options.
+- `h.evaluation({ id, prompt, select, options, rows })`: select one or many option columns while comparing feature rows. Users can comment on columns and rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
 - `h.rank({ id, prompt, options })`: drag options into priority order.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into named buckets.
 - `h.classify({ id, prompt, states, options })`: choose one state per option, edit option text, and add options.
@@ -56,7 +57,6 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 - `body`: one rich helper or an array of helpers and strings.
 - `h.html({ markup })`: trusted inline HTML.
 - `h.frame({ src, srcdoc, title, fileName, height })`: iframe preview. Use `srcdoc` for inline frames; they still get a new-tab preview button.
-- `h.prosCons({ pros, cons })`: compact tradeoff block.
 - `h.code({ lang, value })`: highlighted code block.
 
 ## How to Interview
@@ -76,6 +76,7 @@ Do not force user to make every little decision - aim at the least amount of que
 
 - Use `classify` to validate ubiquitous language: terms, labels, domain objects, actions, and claims that must mean the same thing to the user and the agent.
 - Use `classify` to collect assumptions in one place and let the user evaluate them.
+- Use `evaluation` for tier, package, vendor, implementation, or design-option comparisons where rows are shared criteria and columns are the selectable answers.
 - Use `bucket` to separate decisions into “decide now,” “decide later,” and “do not care.”
 - Use `rank` when the ordered result itself matters: workflow steps, independent sections, or agenda items.
 - Use `edit` to let the user fine-tune something short and critical.

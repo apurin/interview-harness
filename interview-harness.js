@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "0.1.1";
+  const VERSION = "1.0.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
@@ -29,16 +29,20 @@
   const tagged = (key, value) => (config) => Object.assign({ [key]: value }, config || {});
   const text = tagged("type", "text");
   const choice = tagged("type", "choice");
+  const evaluation = tagged("type", "evaluation");
   const rank = tagged("type", "rank");
   const bucket = tagged("type", "bucket");
   const classify = tagged("type", "classify");
   const edit = tagged("type", "edit");
   const frame = tagged("view", "frame");
   const html = tagged("view", "html");
-  const prosCons = tagged("view", "prosCons");
   const code = tagged("view", "code");
 
   function option(config) {
+    return Object.assign({}, config || {});
+  }
+
+  function feature(config) {
     return Object.assign({}, config || {});
   }
 
@@ -52,6 +56,11 @@
       select: normalizeChoiceSelect(raw.select),
       cardsPerRow: normalizeCardsPerRow(raw.cardsPerRow),
       options: normalizeOptions(raw.options)
+    }),
+    evaluation: (raw) => ({
+      select: normalizeChoiceSelect(raw.select),
+      options: normalizeOptions(raw.options || raw.columns),
+      rows: normalizeEvaluationRows(raw.rows || raw.features || raw.criteria)
     }),
     rank: (raw) => ({ options: normalizeOptions(raw.options) }),
     bucket: (raw) => ({
@@ -103,6 +112,7 @@
 
   function inferQuestionType(raw) {
     if (raw.artifact || raw.content) return "edit";
+    if (raw.rows || raw.features || raw.criteria || raw.columns) return "evaluation";
     if (raw.buckets) return "bucket";
     if (raw.states) return "classify";
     if (raw.options || raw.select) return "choice";
@@ -148,6 +158,51 @@
     });
   }
 
+  function normalizeEvaluationRows(input) {
+    return asArray(input).map((entry, index) => {
+      if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
+        const title = String(entry);
+        return { id: slugify(title) || `feature-${index + 1}`, title, body: "", cells: {}, group: "" };
+      }
+
+      const raw = Object.assign({}, entry || {});
+      const title = String(raw.title || raw.label || raw.name || raw.id || `Feature ${index + 1}`);
+      return {
+        id: String(raw.id || slugify(title) || `feature-${index + 1}`),
+        title,
+        body: raw.body || raw.detail || raw.description || "",
+        group: raw.group || raw.section || "",
+        cells: normalizeEvaluationCells(raw.cells || raw.values || raw.options || {})
+      };
+    });
+  }
+
+  function normalizeEvaluationCells(input) {
+    if (Array.isArray(input)) {
+      return Object.fromEntries(input.map((entry) => {
+        const raw = Object.assign({}, entry || {});
+        const id = String(raw.option || raw.optionId || raw.column || raw.id || "");
+        return id ? [id, normalizeEvaluationCell(raw)] : null;
+      }).filter(Boolean));
+    }
+    return Object.fromEntries(Object.entries(safeObject(input)).map(([key, value]) => [key, normalizeEvaluationCell(value)]));
+  }
+
+  function normalizeEvaluationCell(input) {
+    if (input === undefined || input === null || input === "") return { icon: "", text: "", detail: "" };
+    if (typeof input === "string" || typeof input === "number" || typeof input === "boolean") {
+      const text = String(input);
+      return isEvaluationIcon(text) ? { icon: text, text: "", detail: "" } : { icon: "", text, detail: "" };
+    }
+    const raw = Object.assign({}, input || {});
+    const icon = raw.icon || raw.status || raw.value || "";
+    return {
+      icon: isEvaluationIcon(icon) ? String(icon) : "",
+      text: valueToText(raw.text || raw.label || raw.title || (isEvaluationIcon(icon) ? "" : icon)),
+      detail: valueToText(raw.detail || raw.description || raw.note || raw.tooltip || "")
+    };
+  }
+
   function normalizeArtifact(input) {
     if (typeof input === "string") return { view: "code", lang: "", value: input };
     if (input && input.view === "code") return input;
@@ -162,6 +217,9 @@
     choice: (questionDef) => questionDef.select === "many"
       ? { selected: [], comments: {}, added: [] }
       : { selected: "", comments: {} },
+    evaluation: (questionDef) => questionDef.select === "many"
+      ? { selected: [], optionComments: {}, rowComments: {}, touched: false }
+      : { selected: "", optionComments: {}, rowComments: {}, touched: false },
     rank: (questionDef) => ({ order: optionIds(questionDef.options), comments: {}, touched: false }),
     bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
     classify: (questionDef) => ({
@@ -179,6 +237,17 @@
       answer.selected = asArray(saved.selected);
       answer.added = normalizeAddedOptions(saved.added);
       answer.touched = Boolean(answer.selected.length || answer.added.length || commentCount(answer));
+    },
+    evaluation(questionDef, answer, saved) {
+      answer.optionComments = safeObject(saved.optionComments);
+      answer.rowComments = safeObject(saved.rowComments);
+      answer.selected = questionDef.select === "many" ? asArray(saved.selected) : String(saved.selected || "");
+      answer.touched = Boolean(
+        saved.touched ||
+        asArray(answer.selected).length ||
+        commentCount({ comments: answer.optionComments }) ||
+        commentCount({ comments: answer.rowComments })
+      );
     },
     rank(questionDef, answer, saved) {
       answer.order = orderedKnownIds(saved.order, questionDef.options);
@@ -239,6 +308,8 @@
     const savedAnswer = safeObject(saved);
     const answer = Object.assign({}, initial, savedAnswer);
     if (initial.comments) answer.comments = Object.assign({}, initial.comments, safeObject(savedAnswer.comments));
+    if (initial.optionComments) answer.optionComments = Object.assign({}, initial.optionComments, safeObject(savedAnswer.optionComments));
+    if (initial.rowComments) answer.rowComments = Object.assign({}, initial.rowComments, safeObject(savedAnswer.rowComments));
     const hydrate = answerHydrators[questionDef.type];
     if (hydrate) hydrate(questionDef, answer, savedAnswer, initial);
     return answer;
@@ -258,6 +329,7 @@
   const answerSerializers = {
     text: serializeTextAnswer,
     choice: serializeChoiceAnswer,
+    evaluation: serializeEvaluationAnswer,
     rank: serializeRankAnswer,
     bucket: serializeBucketAnswer,
     classify: serializeClassifyAnswer,
@@ -300,6 +372,22 @@
       payload.selected = findOption(questionDef, answer, answer.selected);
     }
     if (comments.length) payload.comments = comments;
+    return payload;
+  }
+
+  function serializeEvaluationAnswer(questionDef, answer) {
+    const selectedIds = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
+    const selected = selectedIds.map((id) => evaluationOptionPayload(questionDef, id)).filter(Boolean);
+    const payload = { select: questionDef.select };
+    const optionCommentsList = optionComments(questionDef.options, answer.optionComments);
+    const rowCommentsList = evaluationRowComments(questionDef.rows, answer.rowComments);
+    if (selected.length) {
+      payload.selected = selected.map((entry) => Object.assign({}, entry, {
+        rows: questionDef.rows.map((row) => evaluationRowPayload(row, entry.id)).filter(Boolean)
+      }));
+    }
+    if (optionCommentsList.length) payload.optionComments = optionCommentsList;
+    if (rowCommentsList.length) payload.rowComments = rowCommentsList;
     return payload;
   }
 
@@ -358,6 +446,7 @@
   const textExporters = {
     text: appendTextAnswer,
     choice: appendChoiceAnswer,
+    evaluation: appendEvaluationAnswer,
     rank: appendRankAnswer,
     bucket: appendBucketAnswer,
     classify: appendClassifyAnswer,
@@ -401,6 +490,26 @@
       });
     }
     appendComments(lines, entry.comments || []);
+  }
+
+  function appendEvaluationAnswer(lines, entry) {
+    if (entry.selected && entry.selected.length) {
+      lines.push("Selected:");
+      entry.selected.forEach((option) => lines.push(`- ${option.title}`));
+      entry.selected.forEach((option) => {
+        if (!option.rows || !option.rows.length) return;
+        lines.push("");
+        lines.push(`${option.title} details:`);
+        option.rows.forEach((row) => {
+          const cell = row.cell || {};
+          const value = [cell.icon, cell.text].filter(Boolean).join(" ");
+          const detail = cell.detail ? ` (${cell.detail})` : "";
+          lines.push(`- ${row.title}: ${value || "No value"}${detail}`);
+        });
+      });
+    }
+    appendComments(lines, entry.optionComments || [], "Column comments:");
+    appendComments(lines, entry.rowComments || [], "Feature row comments:");
   }
 
   function appendRankAnswer(lines, entry) {
@@ -449,10 +558,10 @@
     if (entry.summary) lines.push(`Overall comment: ${entry.summary}`);
   }
 
-  function appendComments(lines, comments) {
+  function appendComments(lines, comments, heading) {
     const filled = comments.filter((entry) => entry.comment);
     if (!filled.length) return;
-    lines.push("Comments:");
+    lines.push(heading || "Comments:");
     filled.forEach((entry) => lines.push(`- ${entry.title}: ${entry.comment}`));
   }
 
@@ -462,6 +571,14 @@
       return questionDef.select === "many"
         ? Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length)
         : Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
+    },
+    evaluation(questionDef, answer) {
+      const selected = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
+      return Boolean(
+        selected.length ||
+        optionComments(questionDef.options, answer.optionComments).length ||
+        evaluationRowComments(questionDef.rows, answer.rowComments).length
+      );
     },
     rank: (questionDef, answer) => Boolean(orderChanged(questionDef, answer.order) || optionComments(questionDef.options, answer.comments).length),
     bucket: (questionDef, answer) => Boolean(
@@ -743,12 +860,37 @@
     .ih-html-preview th, .ih-html-preview td { border-bottom: 0; padding: 6px 7px; text-align: left; vertical-align: top; }
     .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
     .ih-html-preview .ih-mini-callout { border-left: 0; padding: 8px 10px; background: var(--ih-surface-2); color: var(--ih-ink); }
-    .ih-pros-cons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 0; }
-    .ih-pros, .ih-cons { padding: 0; border: 0; background: transparent; }
-    .ih-pros strong, .ih-cons strong { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-    .ih-pros strong { color: var(--ih-good); }
-    .ih-cons strong { color: var(--ih-danger); }
-    .ih-pros ul, .ih-cons ul { margin: 0; padding-left: 18px; }
+    .ih-evaluation-board { min-width: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2)); overflow: hidden; }
+    .ih-evaluation-head { display: flex; justify-content: space-between; align-items: start; gap: 14px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
+    .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; }
+    .ih-evaluation-selection { display: flex; align-items: center; gap: 7px; color: var(--ih-muted); font-size: 12px; font-weight: 760; white-space: nowrap; }
+    .ih-evaluation-frame { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; }
+    .ih-evaluation-table { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+    .ih-evaluation-table th, .ih-evaluation-table td { border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 72%, transparent); border-right: 1px solid color-mix(in srgb, var(--ih-line) 48%, transparent); padding: 11px 12px; text-align: left; vertical-align: top; }
+    .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
+    .ih-evaluation-table thead th { position: sticky; top: 0; z-index: 2; background: var(--ih-surface); padding: 10px; }
+    .ih-evaluation-table thead th.is-selected, .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 9%, var(--ih-surface)); }
+    .ih-evaluation-feature-head { width: 31%; color: var(--ih-muted); font-size: 12px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
+    .ih-evaluation-column { width: calc(100% - 38px); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; border: 0; border-radius: var(--ih-radius); background: transparent; color: var(--ih-ink); padding: 6px; text-align: left; }
+    .ih-evaluation-column.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
+    .ih-evaluation-column-title, .ih-evaluation-column-subtitle { overflow-wrap: anywhere; }
+    .ih-evaluation-column-title { font-size: 14px; font-weight: 850; line-height: 1.15; }
+    .ih-evaluation-column-subtitle { grid-column: 2; color: currentColor; opacity: .72; font-size: 11px; line-height: 1.25; }
+    .ih-evaluation-table thead .ih-comment-button { float: right; margin-top: -34px; }
+    .ih-evaluation-group-row th { background: color-mix(in srgb, var(--ih-ink) 6%, var(--ih-surface-2)); color: var(--ih-accent); font-size: 12px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; padding: 8px 12px; }
+    .ih-evaluation-table tbody th { background: color-mix(in srgb, var(--ih-surface) 80%, var(--ih-bg)); }
+    .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
+    .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
+    .ih-evaluation-radio { width: 14px; height: 14px; border-radius: 999px; border: 2px solid currentColor; color: var(--ih-muted); display: inline-block; flex: 0 0 auto; }
+    .ih-evaluation-radio.is-selected { border-color: var(--ih-accent-ink); background: radial-gradient(circle, var(--ih-accent-ink) 42%, transparent 46%); color: var(--ih-accent-ink); }
+    .ih-evaluation-selection .ih-evaluation-radio.is-selected { border-color: var(--ih-accent); background: radial-gradient(circle, var(--ih-accent) 42%, transparent 46%); }
+    .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 9px; background: var(--ih-surface-2); color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.2; max-width: 100%; }
+    .ih-evaluation-cell svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+    .ih-evaluation-cell[data-icon="yes"] { color: var(--ih-good); }
+    .ih-evaluation-cell[data-icon="no"] { color: var(--ih-danger); }
+    .ih-evaluation-cell[data-icon="partial"], .ih-evaluation-cell[data-icon="warn"] { color: var(--ih-warn); }
+    .ih-evaluation-cell[data-icon="unknown"] { color: var(--ih-muted); }
+    .ih-evaluation-cell[data-icon="best"] { color: var(--ih-accent); }
     .ih-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 14px; }
     .ih-add-row textarea { min-height: 70px; }
     .ih-add-row .ih-btn { justify-self: start; }
@@ -862,7 +1004,8 @@
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ih-pros-cons { grid-template-columns: 1fr; }
+      .ih-evaluation-head { display: grid; }
+      .ih-evaluation-selection { flex-wrap: wrap; white-space: normal; }
       .ih-bottom-inner { align-items: stretch; }
     }
     @media (max-width: 680px) {
@@ -960,6 +1103,7 @@
   const questionRenderers = {
     text: renderText,
     choice: renderChoice,
+    evaluation: renderEvaluation,
     rank: renderRank,
     bucket: renderBucket,
     classify: renderClassify,
@@ -1015,6 +1159,81 @@
         <button class="ih-btn ih-btn-accent" type="button" data-action="add-option">Add option</button>
       </div>
     `;
+  }
+
+  function renderEvaluation(questionDef, answer) {
+    const selectedIds = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
+    const selection = questionDef.options.map((entry) => `
+      <span class="ih-evaluation-radio ${selectedIds.includes(entry.id) ? "is-selected" : ""}"></span>
+      <span>${escapeHTML(entry.title)}</span>
+    `).join("");
+    const body = [];
+    let previousGroup = null;
+    questionDef.rows.forEach((row) => {
+      if (row.group && row.group !== previousGroup) {
+        body.push(`<tr class="ih-evaluation-group-row"><th colspan="${questionDef.options.length + 1}">${escapeHTML(row.group)}</th></tr>`);
+        previousGroup = row.group;
+      }
+      body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
+    });
+    return `
+      <div class="ih-evaluation-board">
+        <div class="ih-evaluation-head">
+          <p class="ih-evaluation-note">Select by column. Comment on columns or feature rows when the comparison needs clarification.</p>
+          <div class="ih-evaluation-selection">${selection}</div>
+        </div>
+        <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
+          <table class="ih-evaluation-table">
+            <thead>
+              <tr>
+                <th class="ih-evaluation-feature-head">Feature rows</th>
+                ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
+              </tr>
+            </thead>
+            <tbody>${body.join("")}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEvaluationColumn(questionDef, answer, entry, isSelected) {
+    return `
+      <th class="${isSelected ? "is-selected" : ""}">
+        <button class="ih-evaluation-column ${isSelected ? "is-selected" : ""}" type="button" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
+          <span class="ih-evaluation-radio ${isSelected ? "is-selected" : ""}"></span>
+          <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
+          ${entry.body ? `<span class="ih-evaluation-column-subtitle">${escapeHTML(richPlainText(entry.body))}</span>` : ""}
+        </button>
+        ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+      </th>
+    `;
+  }
+
+  function renderEvaluationRow(questionDef, answer, row, selectedIds) {
+    return `
+      <tr>
+        <th>
+          <div class="ih-evaluation-row-title">
+            <span>${escapeHTML(row.title)}</span>
+            ${renderCommentButton("evaluation-row-comment", row.id, answer.rowComments && answer.rowComments[row.id], "Comment on feature row")}
+          </div>
+          ${row.body ? `<p>${escapeHTML(richPlainText(row.body))}</p>` : ""}
+        </th>
+        ${questionDef.options.map((optionDef) => {
+          const cell = row.cells && row.cells[optionDef.id] || {};
+          return `<td class="${selectedIds.includes(optionDef.id) ? "is-selected" : ""}">${renderEvaluationCell(cell)}</td>`;
+        }).join("")}
+      </tr>
+    `;
+  }
+
+  function renderEvaluationCell(cell) {
+    const icon = isEvaluationIcon(cell && cell.icon) ? cell.icon : "";
+    const text = cell && cell.text ? cell.text : evaluationIconLabel(icon);
+    const detail = cell && cell.detail ? ` title="${escapeAttr(cell.detail)}"` : "";
+    if (!icon && !text) return `<span class="ih-evaluation-cell">-</span>`;
+    return `<span class="ih-evaluation-cell" data-icon="${escapeAttr(icon)}"${detail}>${icon ? evaluationIcon(icon) : ""}${text ? `<span>${escapeHTML(text)}</span>` : ""}</span>`;
   }
 
   function renderRank(questionDef, answer) {
@@ -1194,14 +1413,6 @@
       return `<div class="ih-frame-shell">${bar}${iframe}</div>`;
     }
     if (value.view === "html") return `<div class="ih-html-preview">${value.markup || ""}</div>`;
-    if (value.view === "prosCons") {
-      return `
-        <div class="ih-pros-cons">
-          <div class="ih-pros"><strong>Pros</strong>${renderList(value.pros)}</div>
-          <div class="ih-cons"><strong>Cons</strong>${renderList(value.cons)}</div>
-        </div>
-      `;
-    }
     if (value.view === "code") {
       return renderCodeViewer(value);
     }
@@ -1288,14 +1499,52 @@
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`;
   }
 
+  function evaluationIcon(icon) {
+    const icons = {
+      yes: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
+      no: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+      partial: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14" opacity=".35"/></svg>`,
+      unknown: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 9a3 3 0 1 1 4.6 2.5c-1 .7-1.6 1.3-1.6 2.5"/><path d="M12 18h.01"/></svg>`,
+      warn: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 8v6"/><path d="M12 17h.01"/></svg>`,
+      best: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg>`
+    };
+    return icons[icon] || "";
+  }
+
+  function evaluationIconLabel(icon) {
+    const labels = {
+      yes: "Yes",
+      no: "No",
+      partial: "Partial",
+      unknown: "Unknown",
+      warn: "Risk",
+      best: "Best"
+    };
+    return labels[icon] || "";
+  }
+
   function getCommentValue(answer, kind, optionId) {
     if (!answer) return "";
+    if (kind === "evaluation-option-comment") return answer.optionComments && answer.optionComments[optionId] || "";
+    if (kind === "evaluation-row-comment") return answer.rowComments && answer.rowComments[optionId] || "";
     if (kind === "edit-summary") return answer.summary || "";
     return optionComment(answer, optionId);
   }
 
   function setCommentValue(answer, kind, optionId, value) {
     const textValue = String(value || "");
+    if (kind === "evaluation-option-comment") {
+      if (!answer.optionComments) answer.optionComments = {};
+      if (textValue.trim()) answer.optionComments[optionId] = textValue;
+      else delete answer.optionComments[optionId];
+      return;
+    }
+    if (kind === "evaluation-row-comment") {
+      if (!answer.rowComments) answer.rowComments = {};
+      if (textValue.trim()) answer.rowComments[optionId] = textValue;
+      else delete answer.rowComments[optionId];
+      return;
+    }
     if (kind === "edit-summary") {
       answer.summary = textValue;
       return;
@@ -1417,6 +1666,7 @@
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
       if (action === "choose-option") return this.chooseOption(actionEl.dataset.optionId, context);
+      if (action === "choose-evaluation-option") return this.chooseEvaluationOption(actionEl.dataset.optionId, context);
       if (action === "classify-state") return this.setClassifyState(actionEl.dataset.optionId, actionEl.dataset.classifyState, context);
       if (action === "move-bucket-option") return this.moveBucketOption(actionEl, context);
       if (action === "add-option") return this.addOption(context);
@@ -1459,9 +1709,10 @@
       }
       const choice = event.target.closest(".ih-choice[data-action]");
       if (choice && isFormControl(event.target)) return;
-      if (!choice || !["Enter", " "].includes(event.key)) return;
+      const evaluation = event.target.closest(".ih-evaluation-column[data-action]");
+      if ((!choice && !evaluation) || !["Enter", " "].includes(event.key)) return;
       event.preventDefault();
-      choice.click();
+      (choice || evaluation).click();
     }
 
     sectionForContext(context) {
@@ -1711,6 +1962,22 @@
       this.markChanged(answer);
     }
 
+    chooseEvaluationOption(optionId, context) {
+      const answer = context && context.answer;
+      const questionDef = context && context.questionDef;
+      if (!answer || !questionDef || questionDef.type !== "evaluation") return;
+      if (questionDef.select === "many") {
+        const selected = new Set(asArray(answer.selected));
+        if (selected.has(optionId)) selected.delete(optionId);
+        else selected.add(optionId);
+        answer.selected = Array.from(selected);
+      } else {
+        answer.selected = optionId;
+      }
+      this.refreshEvaluationState(context);
+      this.markChanged(answer);
+    }
+
     setClassifyState(optionId, state, context) {
       const answer = context && context.answer;
       if (!answer) return;
@@ -1858,6 +2125,41 @@
         const dot = card.querySelector(".ih-select-dot");
         if (dot) dot.textContent = isSelected ? "✓" : "+";
       });
+    }
+
+    refreshEvaluationState(context) {
+      const questionDef = context && context.questionDef;
+      const answer = context && context.answer;
+      if (!questionDef || questionDef.type !== "evaluation") return;
+      const section = this.sectionForContext(context);
+      if (!section) return;
+      const selected = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
+      section.querySelectorAll(".ih-evaluation-column[data-option-id]").forEach((button) => {
+        const isSelected = selected.includes(button.dataset.optionId);
+        button.classList.toggle("is-selected", isSelected);
+        button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        const head = button.closest("th");
+        if (head) head.classList.toggle("is-selected", isSelected);
+        button.querySelectorAll(".ih-evaluation-radio").forEach((dot) => dot.classList.toggle("is-selected", isSelected));
+      });
+      section.querySelectorAll(".ih-evaluation-table td").forEach((cell) => {
+        const cellIndex = cell.cellIndex - 1;
+        const option = questionDef.options[cellIndex];
+        cell.classList.toggle("is-selected", Boolean(option && selected.includes(option.id)));
+      });
+      section.querySelector(".ih-evaluation-selection")?.replaceChildren(...this.evaluationSelectionNodes(questionDef, selected));
+    }
+
+    evaluationSelectionNodes(questionDef, selected) {
+      const nodes = [];
+      questionDef.options.forEach((entry) => {
+        const dot = document.createElement("span");
+        dot.className = `ih-evaluation-radio ${selected.includes(entry.id) ? "is-selected" : ""}`;
+        const label = document.createElement("span");
+        label.textContent = entry.title;
+        nodes.push(dot, label);
+      });
+      return nodes;
     }
 
     syncRankDom(context) {
@@ -2152,6 +2454,7 @@
   const questionAnsweredChecks = {
     text: (_questionDef, answer) => Boolean(String(answer.answer || "").trim()),
     choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
+    evaluation: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
     rank: (questionDef, answer) => Boolean(answer.touched) && asArray(answer.order).length >= questionDef.options.length,
     bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id])),
     classify: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.states && answer.states[entry.id])),
@@ -2162,6 +2465,33 @@
     if (!answer) return false;
     const check = questionAnsweredChecks[questionDef.type];
     return check ? check(questionDef, answer) : true;
+  }
+
+  function isEvaluationIcon(value) {
+    return ["yes", "no", "partial", "unknown", "warn", "best"].includes(String(value || ""));
+  }
+
+  function evaluationOptionPayload(questionDef, id) {
+    const entry = questionDef.options.find((candidate) => candidate.id === id);
+    return entry ? { id: entry.id, title: entry.title } : null;
+  }
+
+  function evaluationRowPayload(row, optionId) {
+    const cell = row.cells && row.cells[optionId];
+    if (!cell || (!cell.icon && !cell.text && !cell.detail)) return null;
+    const payload = { id: row.id, title: row.title, cell: {} };
+    if (cell.icon) payload.cell.icon = cell.icon;
+    if (cell.text) payload.cell.text = cell.text;
+    if (cell.detail) payload.cell.detail = cell.detail;
+    return payload;
+  }
+
+  function evaluationRowComments(rows, comments) {
+    return asArray(rows).map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      comment: comments && comments[entry.id] || ""
+    })).filter((entry) => entry.comment);
   }
 
   function answerOptions(questionDef, answer) {
@@ -2307,6 +2637,15 @@
     }
   }
 
+  function richPlainText(value) {
+    if (value === undefined || value === null || value === "") return "";
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+    if (Array.isArray(value)) return value.map(richPlainText).filter(Boolean).join(" ");
+    if (value.markup !== undefined) return String(value.markup).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (value.value !== undefined) return valueToText(value.value);
+    return valueToText(value);
+  }
+
   function escapeHTML(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -2325,14 +2664,15 @@
     mount,
     text,
     choice,
+    evaluation,
     rank,
     bucket,
     classify,
     edit,
     option,
+    feature,
     frame,
     html,
-    prosCons,
     code
   };
 })(window);

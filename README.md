@@ -17,7 +17,7 @@ Create one HTML file that loads the pinned browser library from jsDelivr.
 
 ```html
 <div id="interview-harness"></div>
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.1/interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.0/interview-harness.js"></script>
 <script>
   const h = InterviewHarness;
 
@@ -38,15 +38,28 @@ Create one HTML file that loads the pinned browser library from jsDelivr.
           h.option({
             id: "dense",
             title: "Dense workspace",
-            body: h.prosCons({
-              pros: ["Fast scanning", "Power-user friendly"],
-              cons: ["Can feel busy"]
-            })
+            body: h.html({ markup: "<p>Fast scanning for power users.</p>" })
           }),
           h.option({
             id: "guided",
             title: "Guided setup",
             body: h.html({ markup: "<p>Lower cognitive load, more sequence.</p>" })
+          })
+        ]
+      }),
+      h.evaluation({
+        id: "tier",
+        prompt: "Which launch package fits best?",
+        select: "one",
+        options: ["Lean", "Guided", "Enterprise"],
+        rows: [
+          h.feature({
+            title: "Visual preview",
+            cells: {
+              lean: "no",
+              guided: { icon: "partial", text: "One preview" },
+              enterprise: { icon: "yes", detail: "Comparison gallery" }
+            }
           })
         ]
       }),
@@ -67,20 +80,21 @@ Open the HTML file in a browser. No build step is required.
 Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files.
 
 - Use Git tags as release versions.
-- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.1/interview-harness.js`.
+- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.0/interview-harness.js`.
 - Avoid `@main`, omitted versions, and other floating URLs in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
 
 Remote skill reference:
 
 ```text
-https://cdn.jsdelivr.net/gh/apurin/interview-harness@v0.1.1/skills/interview-harness-opinionated/SKILL.md
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.0/skills/interview-harness-opinionated/SKILL.md
 ```
 
 ## Question API
 
 - `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: single or multiple choice. `select` is `"one"` or `"many"`. `cardsPerRow` is `"auto"`, `1`, `2`, `3`, or `4`.
+- `h.evaluation({ id, prompt, select, options, rows })`: select one or many option columns while comparing feature rows. Use `h.feature({ id, title, body, group, cells })` for rows. Users can comment on columns and rows. Cell icons are `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, and `"best"`; add `text` or `detail` when an icon is not enough.
 - `h.rank({ id, prompt, options })`: drag reorder.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
 - `h.classify({ id, prompt, states, options })`: single-select states and editable option text.
@@ -96,10 +110,9 @@ Rich body helpers:
 
 - `h.html({ markup })`: trusted inline HTML.
 - `h.frame({ src, srcdoc, title, fileName, height })`: iframe preview with a compact source-file header and a new-tab icon button. Inline `srcdoc` frames open from a generated preview URL.
-- `h.prosCons({ pros, cons })`: compact two-column pros and cons.
 - `h.code({ lang, value })`: highlighted code. Edit questions use the same helper for editable artifacts.
 
-An option body may be an array, so one option can combine prose, tables, images, pros/cons, frames, and code.
+An option body may be an array, so one option can combine prose, tables, images, frames, and code.
 
 ## Output
 
@@ -107,6 +120,7 @@ The page exposes text and JSON export. Exports include only changed answers and 
 
 - text answers with content
 - selected choices
+- selected evaluation columns with their row values
 - added options
 - changed rank or bucket order
 - selected classify states
