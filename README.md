@@ -83,6 +83,14 @@ Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files
 - Avoid `@main`, omitted versions, and other floating URLs in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
 
+Release requirements:
+
+- Set `VERSION` in `interview-harness.js` to the release version.
+- Update every pinned CDN URL in `README.md` and `skills/*/SKILL.md` to the same tag.
+- Run `node --check interview-harness.js`.
+- Commit all release files before tagging.
+- Create the matching Git tag, then push both `main` and the tag; jsDelivr serves the CDN release from the pushed tag.
+
 Remote skill reference:
 
 ```text
