@@ -17,7 +17,7 @@ Create one HTML file that loads the pinned browser library from jsDelivr.
 
 ```html
 <div id="interview-harness"></div>
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.1/interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/interview-harness.js"></script>
 <script>
   const h = InterviewHarness;
 
@@ -79,7 +79,7 @@ Open the HTML file in a browser. No build step is required.
 Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files.
 
 - Use Git tags as release versions.
-- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.1/interview-harness.js`.
+- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/interview-harness.js`.
 - Avoid `@main`, omitted versions, and other floating URLs in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
 
@@ -94,7 +94,7 @@ Release requirements:
 Remote skill reference:
 
 ```text
-https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.1/skills/interview-harness-opinionated/SKILL.md
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/skills/interview-harness-opinionated/SKILL.md
 ```
 
 ## Question API

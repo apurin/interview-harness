@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "1.1.1";
+  const VERSION = "1.1.2";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
@@ -741,13 +741,18 @@
       align-content: start;
     }
     .ih-choice:hover { box-shadow: 0 12px 28px rgb(8 14 13 / 22%); }
-    .ih-choice.is-selected { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
+    .ih-choice.is-selected,
+    .ih-choice.is-selected:hover {
+      box-shadow:
+        0 0 0 2px color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        0 0 14px rgb(242 193 78 / 28%);
+    }
     .ih-option-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
     .ih-option-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .ih-option-title { margin: 0; font-size: clamp(16px, 1.25vw, 20px); line-height: 1.18; letter-spacing: 0; }
-    .ih-select-dot, .ih-icon-btn, .ih-comment-button, .ih-move-button, .ih-remove-icon {
-      width: 32px;
-      height: 32px;
+    .ih-icon-btn, .ih-comment-button, .ih-move-button, .ih-remove-icon {
+      width: 26px;
+      height: 26px;
       flex: 0 0 auto;
       border: 0;
       border-radius: 999px;
@@ -758,17 +763,39 @@
       font-weight: 850;
       padding: 0;
     }
-    .ih-choice.is-selected .ih-select-dot { color: var(--ih-accent-ink); background: var(--ih-accent); }
-    .ih-comment-button svg, .ih-move-button svg, .ih-remove-icon svg { width: 16px; height: 16px; }
-    .ih-comment-button { border-color: transparent; background: color-mix(in srgb, var(--ih-accent) 14%, var(--ih-surface-2)); color: var(--ih-accent); }
-    .ih-comment-button:hover { background: color-mix(in srgb, var(--ih-accent) 22%, var(--ih-surface-2)); color: var(--ih-accent); }
-    .ih-comment-button.has-comment { color: var(--ih-accent-ink); border-color: transparent; background: var(--ih-accent); }
+    .ih-move-button svg, .ih-remove-icon svg { width: 18px; height: 18px; }
+    .ih-move-button svg { fill: currentColor; display: block; }
+    .ih-app .ih-comment-button, .ih-evaluation-detail-button {
+      width: 26px;
+      height: 26px;
+      background: transparent;
+      color: color-mix(in srgb, var(--ih-muted) 82%, var(--ih-surface));
+    }
+    .ih-app .ih-comment-button {
+      padding: 2px;
+    }
+    .ih-app .ih-comment-button svg {
+      width: 100%;
+      height: 100%;
+      fill: currentColor;
+      display: block;
+    }
+    .ih-evaluation-detail-button svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+      display: block;
+    }
+    .ih-app .ih-comment-button:hover, .ih-evaluation-detail-button:hover { color: color-mix(in srgb, var(--ih-accent) 56%, var(--ih-muted)); }
+    .ih-app .ih-comment-button.has-comment { color: color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)); background: transparent; }
+    .ih-app .ih-comment-button.has-comment svg { filter: drop-shadow(0 0 5px rgb(242 193 78 / 30%)); }
+    .ih-app .ih-comment-button.has-comment:hover { color: color-mix(in srgb, var(--ih-warn) 84%, var(--ih-ink)); }
     .ih-move-menu { display: inline-grid; }
     .ih-move-menu[open] { z-index: 70; }
-    .ih-move-button { list-style: none; border-color: transparent; background: color-mix(in srgb, var(--ih-ink) 7%, var(--ih-surface-2)); color: var(--ih-muted); }
+    .ih-move-button { list-style: none; border-color: transparent; background: transparent; color: color-mix(in srgb, var(--ih-muted) 82%, var(--ih-surface)); }
     .ih-move-button::-webkit-details-marker { display: none; }
     .ih-move-button::marker { content: ""; }
-    .ih-move-button:hover, .ih-move-menu[open] .ih-move-button { background: color-mix(in srgb, var(--ih-accent) 18%, var(--ih-surface-2)); color: var(--ih-accent); }
+    .ih-move-button:hover, .ih-move-menu[open] .ih-move-button { background: transparent; color: color-mix(in srgb, var(--ih-accent) 56%, var(--ih-muted)); }
     .ih-move-dropdown {
       position: fixed;
       top: var(--ih-move-top, 8px);
@@ -837,7 +864,7 @@
     .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
     .ih-html-preview .ih-mini-callout { border-left: 0; padding: 8px 10px; background: var(--ih-surface-2); color: var(--ih-ink); }
     .ih-evaluation-board {
-      --ih-evaluation-column-width: 238px;
+      --ih-evaluation-column-width: 298px;
       min-width: 0;
       border-radius: var(--ih-radius);
       background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
@@ -872,16 +899,38 @@
     .ih-evaluation-table td { vertical-align: middle; }
     .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
     .ih-evaluation-table thead th { background: var(--ih-surface); padding: 10px; }
-    .ih-evaluation-table thead th.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
-    .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 7%, var(--ih-surface)); }
+    .ih-evaluation-table thead th.is-selected {
+      background: var(--ih-surface);
+      color: var(--ih-ink);
+      box-shadow:
+        inset 2px 0 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        inset -2px 0 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        inset 0 2px 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        0 0 12px rgb(242 193 78 / 22%);
+    }
+    .ih-evaluation-table td.is-selected {
+      box-shadow:
+        inset 2px 0 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        inset -2px 0 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted));
+    }
+    .ih-evaluation-table tbody tr:last-child td.is-selected {
+      box-shadow:
+        inset 2px 0 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        inset -2px 0 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)),
+        inset 0 -2px 0 color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted));
+    }
     .ih-evaluation-table thead th:first-child, .ih-evaluation-table tbody th { position: sticky; left: 0; z-index: 4; box-shadow: 1px 0 0 color-mix(in srgb, var(--ih-line) 56%, transparent); }
     .ih-evaluation-table tbody th:not(.ih-evaluation-group-cell) { z-index: 2; }
     .ih-evaluation-feature-head { color: var(--ih-muted); }
     .ih-evaluation-table thead th[data-action] { cursor: pointer; }
     .ih-evaluation-table thead th[data-action]:focus-visible { outline: 3px solid var(--ih-accent-soft); outline-offset: -3px; }
+    .ih-evaluation-table tbody td[data-action="choose-evaluation-option"] { cursor: pointer; }
+    .ih-evaluation-table tbody td[data-action="choose-evaluation-option"]:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--ih-warn) 54%, transparent);
+      outline-offset: -3px;
+    }
     .ih-evaluation-column { min-width: 0; width: 100%; display: grid; gap: 6px; color: inherit; }
-    .ih-evaluation-column-main { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
-    .ih-evaluation-column-actions { display: inline-flex; align-items: center; gap: 2px; }
+    .ih-evaluation-column-actions { min-height: 26px; display: flex; align-items: start; justify-content: space-between; gap: 8px; }
     .ih-evaluation-column-title { min-width: 0; font-size: 14px; font-weight: 850; line-height: 1.18; overflow-wrap: normal; word-break: normal; hyphens: auto; }
     .ih-evaluation-column-tags { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
     .ih-evaluation-column-tag { max-width: 100%; border-radius: 999px; background: color-mix(in srgb, var(--ih-ink) 8%, transparent); color: currentColor; opacity: .74; padding: 3px 6px; font-size: 10px; font-weight: 760; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -889,11 +938,12 @@
     .ih-evaluation-group-row td { background: color-mix(in srgb, var(--ih-ink) 4%, var(--ih-surface-2)); padding: 8px 0; }
     .ih-evaluation-group-cell { z-index: 3; }
     .ih-evaluation-table tbody th { background: color-mix(in srgb, var(--ih-surface) 80%, var(--ih-bg)); }
-    .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
+    .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
+    .ih-evaluation-row-title .ih-comment-button { align-self: start; }
     .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
     .ih-evaluation-cell-shell { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.25; max-width: 100%; overflow-wrap: normal; word-break: normal; }
-    .ih-evaluation-cell svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+    .ih-evaluation-cell svg { width: 16px; height: 16px; fill: currentColor; stroke: none; flex: 0 0 auto; }
     .ih-evaluation-cell[data-icon="yes"] { color: color-mix(in srgb, var(--ih-good) 78%, var(--ih-muted)); }
     .ih-evaluation-cell[data-icon="no"] { color: var(--ih-danger); }
     .ih-evaluation-cell[data-icon="partial"] { color: var(--ih-muted); }
@@ -906,11 +956,10 @@
       fill: #ffd23f;
       stroke: #5a3d00;
       stroke-width: 1.35;
-      filter: drop-shadow(0 0 8px rgb(255 210 63 / 46%));
     }
     .ih-evaluation-detail-button {
-      width: 22px;
-      height: 22px;
+      width: 26px;
+      height: 26px;
       flex: 0 0 auto;
       display: inline-grid;
       place-items: center;
@@ -922,17 +971,26 @@
       cursor: help;
     }
     .ih-evaluation-detail-button svg {
-      width: 17px;
-      height: 17px;
       fill: currentColor;
       display: block;
     }
-    .ih-evaluation-table td.is-selected .ih-evaluation-detail-button { color: color-mix(in srgb, var(--ih-accent) 58%, var(--ih-muted)); }
-    .ih-evaluation-table thead .ih-evaluation-detail-button { width: 20px; height: 20px; color: currentColor; opacity: .62; }
-    .ih-evaluation-table thead .ih-evaluation-detail-button svg { width: 15px; height: 15px; }
-    .ih-evaluation-table thead th.is-selected .ih-evaluation-detail-button { color: currentColor; opacity: .76; }
-    .ih-evaluation-detail-button:hover { color: var(--ih-muted); }
-    .ih-evaluation-table thead .ih-evaluation-detail-button:hover { color: currentColor; opacity: 1; }
+    .ih-evaluation-table td.is-selected .ih-evaluation-detail-button { color: color-mix(in srgb, var(--ih-warn) 58%, var(--ih-muted)); }
+    .ih-evaluation-table thead .ih-evaluation-detail-button,
+    .ih-evaluation-table thead .ih-comment-button { color: currentColor; opacity: .62; }
+    .ih-evaluation-table thead th.is-selected .ih-evaluation-detail-button,
+    .ih-evaluation-table thead th.is-selected .ih-comment-button { color: currentColor; opacity: .76; }
+    .ih-evaluation-table thead .ih-evaluation-detail-button:hover,
+    .ih-evaluation-table thead .ih-comment-button:hover { color: currentColor; opacity: 1; }
+    .ih-evaluation-table thead .ih-comment-button.has-comment,
+    .ih-evaluation-table thead th.is-selected .ih-comment-button.has-comment {
+      color: color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted));
+      opacity: 1;
+    }
+    .ih-evaluation-table thead .ih-comment-button.has-comment:hover,
+    .ih-evaluation-table thead th.is-selected .ih-comment-button.has-comment:hover {
+      color: color-mix(in srgb, var(--ih-warn) 84%, var(--ih-ink));
+      opacity: 1;
+    }
     .ih-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 14px; }
     .ih-add-row textarea { min-height: 70px; }
     .ih-add-row .ih-btn { justify-self: start; }
@@ -1038,6 +1096,7 @@
     .ih-comment-popover { width: min(720px, 100%); border: 0; border-radius: var(--ih-radius); background: var(--ih-surface); box-shadow: var(--ih-shadow); padding: 14px; }
     .ih-comment-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
     .ih-comment-head h3 { margin: 0; font-size: 16px; }
+    .ih-shortcut-key { min-width: 24px; border-radius: 4px; background: color-mix(in srgb, var(--ih-ink) 10%, transparent); padding: 2px 5px; font: 10px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; }
     .ih-comment-popover textarea { min-height: 150px; max-height: 55vh; width: 100%; resize: none; line-height: 1.45; }
     .ih-evaluation-tooltip {
       position: fixed;
@@ -1075,7 +1134,7 @@
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ih-evaluation-board { --ih-evaluation-column-width: 220px; }
+      .ih-evaluation-board { --ih-evaluation-column-width: 275px; }
       .ih-bottom-inner { align-items: stretch; }
     }
     @media (max-width: 680px) {
@@ -1115,8 +1174,8 @@
         <main class="ih-main ${viewMode === "all" ? "is-all" : ""}">${stepHtml}</main>
         ${viewMode === "paged" ? `<footer class="ih-bottom">
           <div class="ih-bottom-inner">
-            <button class="ih-btn" type="button" data-action="back" ${instance.state.step === 0 ? "disabled" : ""}>Back</button>
-            <button class="ih-btn ih-btn-primary" type="button" data-action="next">${escapeHTML(nextLabel(instance))}</button>
+            <button class="ih-btn" type="button" data-action="back" ${instance.state.step === 0 ? "disabled" : ""}>Back <kbd class="ih-shortcut-key">[</kbd></button>
+            <button class="ih-btn ih-btn-primary" type="button" data-action="next">${escapeHTML(nextLabel(instance))} <kbd class="ih-shortcut-key">]</kbd></button>
           </div>
         </footer>` : ""}
         ${renderCommentPopover(instance)}
@@ -1213,7 +1272,6 @@
           <div class="ih-option-actions">
             ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on option")}
             ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
-            ${entry.custom ? "" : `<span class="ih-select-dot">${isSelected ? "✓" : "+"}</span>`}
           </div>
         </div>
         ${renderTags(entry.tags)}
@@ -1237,7 +1295,7 @@
     let previousGroup = null;
     questionDef.rows.forEach((row) => {
       if (row.group && row.group !== previousGroup) {
-        body.push(`<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell">${escapeHTML(row.group)}</th><td colspan="${questionDef.options.length}"></td></tr>`);
+        body.push(renderEvaluationGroupRow(questionDef, row, selectedIds));
         previousGroup = row.group;
       }
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
@@ -1274,18 +1332,29 @@
     `;
   }
 
+  function renderEvaluationGroupRow(questionDef, row, selectedIds) {
+    const cells = questionDef.options.map((optionDef) => {
+      return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column`)}></td>`;
+    }).join("");
+    return `<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell">${escapeHTML(row.group)}</th>${cells}</tr>`;
+  }
+
+  function renderEvaluationCellAttrs(optionDef, selectedIds, label) {
+    const isSelected = selectedIds.includes(optionDef.id);
+    const classAttr = isSelected ? ` class="is-selected"` : "";
+    return `${classAttr} data-action="choose-evaluation-option" data-option-id="${escapeAttr(optionDef.id)}" tabindex="0" role="button" aria-pressed="${isSelected ? "true" : "false"}" aria-label="${escapeAttr(label)}"`;
+  }
+
   function renderEvaluationColumn(questionDef, answer, entry, isSelected) {
     const bodyText = richPlainText(entry.body);
     return `
       <th class="${isSelected ? "is-selected" : ""}" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" tabindex="0" role="button" aria-pressed="${isSelected ? "true" : "false"}">
         <div class="ih-evaluation-column ${isSelected ? "is-selected" : ""}">
-          <div class="ih-evaluation-column-main">
-            <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
-            <span class="ih-evaluation-column-actions">
-              ${bodyText ? `<span class="ih-evaluation-detail-button" data-detail-title="${escapeAttr(entry.title)}" data-detail="${escapeAttr(bodyText)}" aria-label="Details for ${escapeAttr(entry.title)}">${infoIcon()}</span>` : ""}
-              ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
-            </span>
-          </div>
+          <span class="ih-evaluation-column-actions">
+            ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+            ${bodyText ? `<span class="ih-evaluation-detail-button" data-detail-title="${escapeAttr(entry.title)}" data-detail="${escapeAttr(bodyText)}" aria-label="Details for ${escapeAttr(entry.title)}">${infoIcon()}</span>` : ""}
+          </span>
+          <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
           ${renderEvaluationColumnTags(entry.tags)}
         </div>
       </th>
@@ -1310,7 +1379,7 @@
         </th>
         ${questionDef.options.map((optionDef) => {
           const cell = row.cells && row.cells[optionDef.id] || {};
-          return `<td class="${selectedIds.includes(optionDef.id) ? "is-selected" : ""}">${renderEvaluationCell(cell)}</td>`;
+          return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column for ${row.title}`)}>${renderEvaluationCell(cell)}</td>`;
         }).join("")}
       </tr>
     `;
@@ -1572,7 +1641,7 @@
         <section class="ih-comment-popover" role="dialog" aria-modal="true" aria-label="Comment editor" data-action="keep-comment-open">
           <div class="ih-comment-head">
             <h3>Comment</h3>
-            <button class="ih-btn" type="button" data-action="close-comment">Done</button>
+            <button class="ih-btn" type="button" data-action="close-comment">Done <kbd class="ih-shortcut-key">Esc</kbd></button>
           </div>
           <textarea class="ih-field ih-auto-field" data-input="comment-modal" placeholder="Write a note for the next agent...">${escapeHTML(value)}</textarea>
         </section>
@@ -1581,33 +1650,33 @@
   }
 
   function commentIcon() {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M18 3a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4h-4.724l-4.762 2.857a1 1 0 0 1-1.508-.743L7 21v-2H6a4 4 0 0 1-3.995-3.8L2 15V7a4 4 0 0 1 4-4zm-4 9H8a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2m2-4H8a1 1 0 1 0 0 2h8a1 1 0 0 0 0-2"/></svg>`;
   }
 
   function moveIcon() {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="m7 8-4 4 4 4"/><path d="m17 8 4 4-4 4"/></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M6.707 3.293a1 1 0 0 1 .083 1.32l-.083.094L5.415 6H10a1 1 0 0 1 .117 1.993L10 8H5.415l1.292 1.293a1 1 0 0 1 .083 1.32l-.083.094a1 1 0 0 1-1.32.083l-.094-.083l-3-3a1.008 1.008 0 0 1-.097-.112l-.071-.11l-.054-.114l-.035-.105l-.025-.118l-.007-.058L2 7l.003-.075l.017-.126l.03-.111l.044-.111l.052-.098l.064-.092l.083-.094l3-3a1 1 0 0 1 1.414 0"/><path d="m18.613 3.21l.094.083l3 3a.927.927 0 0 1 .097.112l.071.11l.054.114l.035.105l.03.148L22 7l-.003.075l-.017.126l-.03.111l-.044.111l-.052.098l-.074.104l-.073.082l-3 3a1 1 0 0 1-1.497-1.32l.083-.094L18.585 8H14a1 1 0 0 1-.117-1.993L14 6h4.585l-1.292-1.293a1 1 0 0 1-.083-1.32l.083-.094a1 1 0 0 1 1.32-.083"/><path d="M18 13H6a3 3 0 0 0-3 3v2a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-2a3 3 0 0 0-3-3"/></svg>`;
   }
 
   function externalLinkIcon() {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 5a1 1 0 0 1 0 2H6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-6a1 1 0 0 1 2 0v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3zm3-2h5l.075.003l.126.017l.111.03l.111.044l.098.052l.096.067l.09.08q.054.053.097.112l.071.11l.054.114l.035.105l.03.148l.006.118v5a1 1 0 0 1-2 0V6.414l-7.293 7.293a1 1 0 0 1-1.414-1.414L17.58 5H15a1 1 0 0 1 0-2"/></svg>`;
   }
 
   function infoIcon() {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M12 3.75a8.25 8.25 0 1 0 0 16.5 8.25 8.25 0 0 0 0-16.5Zm-1.05 6.75h2.1v6h-2.1v-6Zm0-3h2.1v2h-2.1v-2Z"/></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 2c5.523 0 10 4.477 10 10a10 10 0 0 1-19.995.324L2 12l.004-.28C2.152 6.327 6.57 2 12 2m0 9h-1l-.117.007a1 1 0 0 0 0 1.986L11 13v3l.007.117a1 1 0 0 0 .876.876L12 17h1l.117-.007a1 1 0 0 0 .876-.876L14 16l-.007-.117a1 1 0 0 0-.764-.857l-.112-.02L13 15v-3l-.007-.117a1 1 0 0 0-.876-.876zm.01-3l-.127.007a1 1 0 0 0 0 1.986L12 10l.127-.007a1 1 0 0 0 0-1.986z"/></svg>`;
   }
 
   function trashIcon() {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M19 2H5a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3V5a3 3 0 0 0-3-3m-9.387 6.21l.094.083L12 10.585l2.293-2.292a1 1 0 0 1 1.497 1.32l-.083.094L13.415 12l2.292 2.293a1 1 0 0 1-1.32 1.497l-.094-.083L12 13.415l-2.293 2.292a1 1 0 0 1-1.497-1.32l.083-.094L10.585 12L8.293 9.707a1 1 0 0 1 1.32-1.497"/></svg>`;
   }
 
   function evaluationIcon(icon) {
     const icons = {
-      yes: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
-      no: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-      partial: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14" opacity=".35"/></svg>`,
-      unknown: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 9a3 3 0 1 1 4.6 2.5c-1 .7-1.6 1.3-1.6 2.5"/><path d="M12 18h.01"/></svg>`,
-      warn: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 8v6"/><path d="M12 17h.01"/></svg>`,
-      best: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg>`
+      yes: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 2c-.218 0-.432.002-.642.005l-.616.017l-.299.013l-.579.034l-.553.046c-4.785.464-6.732 2.411-7.196 7.196l-.046.553l-.034.579l-.013.299l-.017.616L2 12l.005.642l.017.616l.013.299l.034.579l.046.553c.464 4.785 2.411 6.732 7.196 7.196l.553.046l.579.034l.299.013l.616.017L12 22l.642-.005l.616-.017l.299-.013l.579-.034l.553-.046c4.785-.464 6.732-2.411 7.196-7.196l.046-.553l.034-.579l.013-.299l.017-.616L22 12l-.005-.642l-.017-.616l-.013-.299l-.034-.579l-.046-.553c-.464-4.785-2.411-6.732-7.196-7.196l-.553-.046l-.579-.034l-.299-.013l-.616-.017L12 2m2.293 7.293a1 1 0 0 1 1.497 1.32l-.083.094l-4 4a1 1 0 0 1-1.32.083l-.094-.083l-2-2a1 1 0 0 1 1.32-1.497l.094.083L11 12.585z"/></svg>`,
+      no: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M17 3.34a10 10 0 1 1-14.995 8.984L2 12l.005-.324A10 10 0 0 1 17 3.34m-6.489 5.8a1 1 0 0 0-1.218 1.567L10.585 12l-1.292 1.293l-.083.094a1 1 0 0 0 1.497 1.32L12 13.415l1.293 1.292l.094.083a1 1 0 0 0 1.32-1.497L13.415 12l1.292-1.293l.083-.094a1 1 0 0 0-1.497-1.32L12 10.585l-1.293-1.292z"/></svg>`,
+      partial: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 1a.993.993 0 0 1 .823.443l.067.116l2.852 5.781l6.38.925c.741.108 1.08.94.703 1.526l-.07.095l-.078.086l-4.624 4.499l1.09 6.355a1.001 1.001 0 0 1-1.249 1.135l-.101-.035l-.101-.046l-5.693-3l-5.706 3c-.105.055-.212.09-.32.106l-.106.01a1.003 1.003 0 0 1-1.038-1.06l.013-.11l1.09-6.355l-4.623-4.5a1.001 1.001 0 0 1 .328-1.647l.113-.036l.114-.023l6.379-.925l2.853-5.78a.968.968 0 0 1 .904-.56M12 4.274V16.75a1 1 0 0 1 .239.029l.115.036l.112.05l4.363 2.299l-.836-4.873a1 1 0 0 1 .136-.696l.07-.099l.082-.09l3.546-3.453l-4.891-.708a1 1 0 0 1-.62-.344l-.073-.097l-.06-.106z"/></svg>`,
+      unknown: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M10.425 1.414a3.33 3.33 0 0 1 3.026-.097l.19.097l6.775 3.995l.096.063l.092.077l.107.075a3.224 3.224 0 0 1 1.266 2.188l.018.202l.005.204v7.284c0 1.106-.57 2.129-1.454 2.693l-.17.1l-6.803 4.302c-.918.504-2.019.535-3.004.068l-.196-.1l-6.695-4.237a3.225 3.225 0 0 1-1.671-2.619L2 15.502V8.217c0-1.106.57-2.128 1.476-2.705zm1.575 13.586a1 1 0 0 0-.993.883L11 16l.007.127a1 1 0 0 0 1.986 0L13 16.01l-.007-.127A1 1 0 0 0 12 15m1.368-6.673a2.98 2.98 0 0 0-3.631.728a1 1 0 0 0 1.44 1.383l.171-.18a.98.98 0 0 1 1.11-.15a1 1 0 0 1-.34 1.886l-.232.012a1 1 0 0 0 .111 1.994a3 3 0 0 0 1.371-5.673"/></svg>`,
+      warn: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 1.67c.955 0 1.845.467 2.39 1.247l.105.16l8.114 13.548a2.914 2.914 0 0 1-2.307 4.363l-.195.008H3.882a2.914 2.914 0 0 1-2.582-4.2l.099-.185l8.11-13.538A2.914 2.914 0 0 1 12 1.67m.01 13.33l-.127.007a1 1 0 0 0 0 1.986L12 17l.127-.007a1 1 0 0 0 0-1.986zM12 8a1 1 0 0 0-.993.883L11 9v4l.007.117a1 1 0 0 0 1.986 0L13 13V9l-.007-.117A1 1 0 0 0 12 8"/></svg>`,
+      best: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="m8.243 7.34l-6.38.925l-.113.023a1 1 0 0 0-.44 1.684l4.622 4.499l-1.09 6.355l-.013.11a1 1 0 0 0 1.464.944l5.706-3l5.693 3l.1.046a1 1 0 0 0 1.352-1.1l-1.091-6.355l4.624-4.5l.078-.085a1 1 0 0 0-.633-1.62l-6.38-.926l-2.852-5.78a1 1 0 0 0-1.794 0z"/></svg>`
     };
     return icons[icon] || "";
   }
@@ -1671,6 +1740,7 @@
       this.evaluationScrollCleanups = [];
       this.exportTimer = null;
       this.toastTimer = null;
+      this.onDocumentKeydown = (event) => this.onKeydown(event);
       this.load();
       this.mount();
     }
@@ -1681,7 +1751,7 @@
       this.root.addEventListener("click", (event) => this.onClick(event));
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
-      this.root.addEventListener("keydown", (event) => this.onKeydown(event));
+      global.document.addEventListener("keydown", this.onDocumentKeydown);
       this.root.addEventListener("mouseover", (event) => this.onMouseover(event));
       this.root.addEventListener("mousemove", (event) => this.onMousemove(event));
       this.root.addEventListener("mouseout", (event) => this.onMouseout(event));
@@ -1841,12 +1911,32 @@
         else if (this.state.commentEditor) this.closeComment();
         else if (this.closeMoveMenus()) event.preventDefault();
       }
-      const choice = event.target.closest(".ih-choice[data-action]");
+      if (this.handlePageShortcut(event)) return;
+      const target = event.target && event.target.closest ? event.target : null;
+      const insideRoot = target && this.root.contains(target);
+      const choice = insideRoot ? target.closest(".ih-choice[data-action]") : null;
       if (choice && isFormControl(event.target)) return;
-      const evaluation = event.target.closest("[data-action='choose-evaluation-option']");
+      const evaluation = insideRoot ? target.closest("[data-action='choose-evaluation-option']") : null;
       if ((!choice && !evaluation) || !["Enter", " "].includes(event.key)) return;
       event.preventDefault();
       (choice || evaluation).click();
+    }
+
+    handlePageShortcut(event) {
+      if (this.viewMode() !== "paged" || this.state.commentEditor || this.state.detailPopover) return false;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isTextEntryControl(event.target)) return false;
+      if (event.key === "[") {
+        if (this.state.step <= 0) return false;
+        event.preventDefault();
+        this.go(-1);
+        return true;
+      }
+      if (event.key === "]") {
+        event.preventDefault();
+        this.go(1);
+        return true;
+      }
+      return false;
     }
 
     sectionForContext(context) {
@@ -2184,7 +2274,7 @@
         else selected.add(optionId);
         answer.selected = Array.from(selected);
       } else {
-        answer.selected = optionId;
+        answer.selected = answer.selected === optionId ? "" : optionId;
       }
       this.refreshChoiceState(context);
       this.markChanged(answer);
@@ -2194,7 +2284,7 @@
       const answer = context && context.answer;
       const questionDef = context && context.questionDef;
       if (!answer || !questionDef || questionDef.type !== "evaluation") return;
-      answer.selected = optionId;
+      answer.selected = answer.selected === optionId ? "" : optionId;
       this.refreshEvaluationState(context);
       this.markChanged(answer);
     }
@@ -2343,8 +2433,6 @@
       section.querySelectorAll(".ih-choice[data-option-id]").forEach((card) => {
         const isSelected = selected.includes(card.dataset.optionId);
         card.classList.toggle("is-selected", isSelected);
-        const dot = card.querySelector(".ih-select-dot");
-        if (dot) dot.textContent = isSelected ? "✓" : "+";
       });
     }
 
@@ -2362,10 +2450,10 @@
         const column = head.querySelector(".ih-evaluation-column");
         if (column) column.classList.toggle("is-selected", isSelected);
       });
-      section.querySelectorAll(".ih-evaluation-table td").forEach((cell) => {
-        const cellIndex = cell.cellIndex - 1;
-        const option = questionDef.options[cellIndex];
-        cell.classList.toggle("is-selected", Boolean(option && selected.includes(option.id)));
+      section.querySelectorAll(".ih-evaluation-table td[data-option-id]").forEach((cell) => {
+        const isSelected = selected.includes(cell.dataset.optionId);
+        cell.classList.toggle("is-selected", isSelected);
+        cell.setAttribute("aria-pressed", isSelected ? "true" : "false");
       });
     }
 
@@ -2795,7 +2883,11 @@
   }
 
   function isFormControl(node) {
-    return Boolean(node.closest("input, textarea, select, label, button, summary, details"));
+    return Boolean(node && node.closest && node.closest("input, textarea, select, label, button, summary, details, [contenteditable='true'], .cm-editor, .cm-content"));
+  }
+
+  function isTextEntryControl(node) {
+    return Boolean(node && node.closest && node.closest("input, textarea, select, [contenteditable='true'], .cm-editor, .cm-content"));
   }
 
   function autoGrowTextarea(node) {
