@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "1.0.0";
+  const VERSION = "1.0.1";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
@@ -860,31 +860,49 @@
     .ih-html-preview th, .ih-html-preview td { border-bottom: 0; padding: 6px 7px; text-align: left; vertical-align: top; }
     .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
     .ih-html-preview .ih-mini-callout { border-left: 0; padding: 8px 10px; background: var(--ih-surface-2); color: var(--ih-ink); }
-    .ih-evaluation-board { min-width: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2)); overflow: hidden; }
-    .ih-evaluation-head { display: flex; justify-content: space-between; align-items: start; gap: 14px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
-    .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; }
-    .ih-evaluation-selection { display: flex; align-items: center; gap: 7px; color: var(--ih-muted); font-size: 12px; font-weight: 760; white-space: nowrap; }
-    .ih-evaluation-frame { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; }
-    .ih-evaluation-table { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+    .ih-evaluation-board {
+      --ih-evaluation-column-width: 190px;
+      min-width: 0;
+      border-radius: var(--ih-radius);
+      background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
+      overflow: hidden;
+    }
+    .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
+    .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
+    .ih-evaluation-selection { display: flex; align-items: center; gap: 8px; color: var(--ih-muted); font-size: 12px; font-weight: 760; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; white-space: nowrap; }
+    .ih-evaluation-frame { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; scrollbar-width: thin; }
+    .ih-evaluation-table {
+      width: max(100%, calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
+      min-width: calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)));
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+    }
+    .ih-evaluation-feature-col { width: 430px; }
+    .ih-evaluation-option-col { width: var(--ih-evaluation-column-width); }
     .ih-evaluation-table th, .ih-evaluation-table td { border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 72%, transparent); border-right: 1px solid color-mix(in srgb, var(--ih-line) 48%, transparent); padding: 11px 12px; text-align: left; vertical-align: top; }
     .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
-    .ih-evaluation-table thead th { position: sticky; top: 0; z-index: 2; background: var(--ih-surface); padding: 10px; }
-    .ih-evaluation-table thead th.is-selected, .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 9%, var(--ih-surface)); }
-    .ih-evaluation-feature-head { width: 31%; color: var(--ih-muted); font-size: 12px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
-    .ih-evaluation-column { width: calc(100% - 38px); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; border: 0; border-radius: var(--ih-radius); background: transparent; color: var(--ih-ink); padding: 6px; text-align: left; }
+    .ih-evaluation-table thead th { position: sticky; top: 0; z-index: 3; background: var(--ih-surface); padding: 10px; }
+    .ih-evaluation-table thead th.is-selected, .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 10%, var(--ih-surface)); }
+    .ih-evaluation-table thead th:first-child, .ih-evaluation-table tbody th:not(.ih-evaluation-group-cell) { position: sticky; left: 0; z-index: 4; box-shadow: 1px 0 0 color-mix(in srgb, var(--ih-line) 56%, transparent); }
+    .ih-evaluation-table tbody th:not(.ih-evaluation-group-cell) { z-index: 2; }
+    .ih-evaluation-feature-head { color: var(--ih-muted); font-size: 12px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
+    .ih-evaluation-column-head { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+    .ih-evaluation-column { min-width: 0; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; border: 0; border-radius: var(--ih-radius); background: transparent; color: var(--ih-ink); padding: 6px; text-align: left; }
     .ih-evaluation-column.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
-    .ih-evaluation-column-title, .ih-evaluation-column-subtitle { overflow-wrap: anywhere; }
-    .ih-evaluation-column-title { font-size: 14px; font-weight: 850; line-height: 1.15; }
-    .ih-evaluation-column-subtitle { grid-column: 2; color: currentColor; opacity: .72; font-size: 11px; line-height: 1.25; }
-    .ih-evaluation-table thead .ih-comment-button { float: right; margin-top: -34px; }
+    .ih-evaluation-column-title { min-width: 0; font-size: 14px; font-weight: 850; line-height: 1.18; overflow-wrap: normal; word-break: normal; hyphens: auto; }
+    .ih-evaluation-column-tags { grid-column: 2; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+    .ih-evaluation-column-tag { max-width: 100%; border-radius: 999px; background: color-mix(in srgb, var(--ih-ink) 8%, transparent); color: currentColor; opacity: .74; padding: 3px 6px; font-size: 10px; font-weight: 760; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ih-evaluation-column-head > .ih-comment-button { margin-top: 5px; }
     .ih-evaluation-group-row th { background: color-mix(in srgb, var(--ih-ink) 6%, var(--ih-surface-2)); color: var(--ih-accent); font-size: 12px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; padding: 8px 12px; }
+    .ih-evaluation-group-cell { position: static; }
     .ih-evaluation-table tbody th { background: color-mix(in srgb, var(--ih-surface) 80%, var(--ih-bg)); }
     .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
     .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
     .ih-evaluation-radio { width: 14px; height: 14px; border-radius: 999px; border: 2px solid currentColor; color: var(--ih-muted); display: inline-block; flex: 0 0 auto; }
     .ih-evaluation-radio.is-selected { border-color: var(--ih-accent-ink); background: radial-gradient(circle, var(--ih-accent-ink) 42%, transparent 46%); color: var(--ih-accent-ink); }
     .ih-evaluation-selection .ih-evaluation-radio.is-selected { border-color: var(--ih-accent); background: radial-gradient(circle, var(--ih-accent) 42%, transparent 46%); }
-    .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 9px; background: var(--ih-surface-2); color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.2; max-width: 100%; }
+    .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 9px; background: var(--ih-surface-2); color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.2; max-width: 100%; overflow-wrap: normal; word-break: normal; }
     .ih-evaluation-cell svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
     .ih-evaluation-cell[data-icon="yes"] { color: var(--ih-good); }
     .ih-evaluation-cell[data-icon="no"] { color: var(--ih-danger); }
@@ -1004,7 +1022,7 @@
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ih-evaluation-head { display: grid; }
+      .ih-evaluation-board { --ih-evaluation-column-width: 176px; }
       .ih-evaluation-selection { flex-wrap: wrap; white-space: normal; }
       .ih-bottom-inner { align-items: stretch; }
     }
@@ -1171,7 +1189,7 @@
     let previousGroup = null;
     questionDef.rows.forEach((row) => {
       if (row.group && row.group !== previousGroup) {
-        body.push(`<tr class="ih-evaluation-group-row"><th colspan="${questionDef.options.length + 1}">${escapeHTML(row.group)}</th></tr>`);
+        body.push(`<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell" colspan="${questionDef.options.length + 1}">${escapeHTML(row.group)}</th></tr>`);
         previousGroup = row.group;
       }
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
@@ -1183,7 +1201,11 @@
           <div class="ih-evaluation-selection">${selection}</div>
         </div>
         <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
-          <table class="ih-evaluation-table">
+          <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
+            <colgroup>
+              <col class="ih-evaluation-feature-col">
+              ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
+            </colgroup>
             <thead>
               <tr>
                 <th class="ih-evaluation-feature-head">Feature rows</th>
@@ -1198,16 +1220,25 @@
   }
 
   function renderEvaluationColumn(questionDef, answer, entry, isSelected) {
+    const bodyText = richPlainText(entry.body);
     return `
       <th class="${isSelected ? "is-selected" : ""}">
-        <button class="ih-evaluation-column ${isSelected ? "is-selected" : ""}" type="button" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" aria-pressed="${isSelected ? "true" : "false"}">
-          <span class="ih-evaluation-radio ${isSelected ? "is-selected" : ""}"></span>
-          <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
-          ${entry.body ? `<span class="ih-evaluation-column-subtitle">${escapeHTML(richPlainText(entry.body))}</span>` : ""}
-        </button>
-        ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+        <div class="ih-evaluation-column-head">
+          <button class="ih-evaluation-column ${isSelected ? "is-selected" : ""}" type="button" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" aria-pressed="${isSelected ? "true" : "false"}" ${bodyText ? `title="${escapeAttr(bodyText)}"` : ""}>
+            <span class="ih-evaluation-radio ${isSelected ? "is-selected" : ""}"></span>
+            <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
+            ${renderEvaluationColumnTags(entry.tags)}
+          </button>
+          ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+        </div>
       </th>
     `;
+  }
+
+  function renderEvaluationColumnTags(tags) {
+    const values = Array.isArray(tags) ? tags.slice(0, 3) : [];
+    if (!values.length) return "";
+    return `<span class="ih-evaluation-column-tags">${values.map((entry) => `<span class="ih-evaluation-column-tag">${escapeHTML(valueToText(entry))}</span>`).join("")}</span>`;
   }
 
   function renderEvaluationRow(questionDef, answer, row, selectedIds) {
