@@ -17,7 +17,7 @@ Create one HTML file that loads the pinned browser library from jsDelivr.
 
 ```html
 <div id="interview-harness"></div>
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.1/interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.0/interview-harness.js"></script>
 <script>
   const h = InterviewHarness;
 
@@ -50,7 +50,6 @@ Create one HTML file that loads the pinned browser library from jsDelivr.
       h.evaluation({
         id: "tier",
         prompt: "Which launch package fits best?",
-        select: "one",
         options: ["Lean", "Guided", "Enterprise"],
         rows: [
           h.feature({
@@ -80,21 +79,21 @@ Open the HTML file in a browser. No build step is required.
 Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files.
 
 - Use Git tags as release versions.
-- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.1/interview-harness.js`.
+- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.0/interview-harness.js`.
 - Avoid `@main`, omitted versions, and other floating URLs in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
 
 Remote skill reference:
 
 ```text
-https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.1/skills/interview-harness-opinionated/SKILL.md
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.0/skills/interview-harness-opinionated/SKILL.md
 ```
 
 ## Question API
 
 - `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: single or multiple choice. `select` is `"one"` or `"many"`. `cardsPerRow` is `"auto"`, `1`, `2`, `3`, or `4`.
-- `h.evaluation({ id, prompt, select, options, rows })`: select one or many option columns while comparing feature rows. Use `h.feature({ id, title, body, group, cells })` for rows. Users can comment on columns and rows. Cell icons are `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, and `"best"`; add `text` or `detail` when an icon is not enough.
+- `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Use `h.feature({ id, title, body, group, cells })` for rows. Users can comment on columns and rows. Cell icons are `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, and `"best"`; add `text` or `detail` when an icon is not enough.
 - `h.rank({ id, prompt, options })`: drag reorder.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
 - `h.classify({ id, prompt, states, options })`: single-select states and editable option text.

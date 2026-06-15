@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "1.0.1";
+  const VERSION = "1.1.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
@@ -58,7 +58,7 @@
       options: normalizeOptions(raw.options)
     }),
     evaluation: (raw) => ({
-      select: normalizeChoiceSelect(raw.select),
+      select: "one",
       options: normalizeOptions(raw.options || raw.columns),
       rows: normalizeEvaluationRows(raw.rows || raw.features || raw.criteria)
     }),
@@ -217,9 +217,7 @@
     choice: (questionDef) => questionDef.select === "many"
       ? { selected: [], comments: {}, added: [] }
       : { selected: "", comments: {} },
-    evaluation: (questionDef) => questionDef.select === "many"
-      ? { selected: [], optionComments: {}, rowComments: {}, touched: false }
-      : { selected: "", optionComments: {}, rowComments: {}, touched: false },
+    evaluation: (_questionDef) => ({ selected: "", optionComments: {}, rowComments: {}, touched: false }),
     rank: (questionDef) => ({ order: optionIds(questionDef.options), comments: {}, touched: false }),
     bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
     classify: (questionDef) => ({
@@ -241,10 +239,10 @@
     evaluation(questionDef, answer, saved) {
       answer.optionComments = safeObject(saved.optionComments);
       answer.rowComments = safeObject(saved.rowComments);
-      answer.selected = questionDef.select === "many" ? asArray(saved.selected) : String(saved.selected || "");
+      answer.selected = String(Array.isArray(saved.selected) ? saved.selected[0] || "" : saved.selected || "");
       answer.touched = Boolean(
         saved.touched ||
-        asArray(answer.selected).length ||
+        answer.selected ||
         commentCount({ comments: answer.optionComments }) ||
         commentCount({ comments: answer.rowComments })
       );
@@ -279,7 +277,7 @@
 
   function createInitialState(questions) {
     const answers = Object.fromEntries(questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
-    return { version: VERSION, step: 0, viewMode: "paged", commentEditor: null, answers };
+    return { version: VERSION, step: 0, viewMode: "paged", commentEditor: null, detailPopover: null, answers };
   }
 
   function initialAnswer(questionDef) {
@@ -293,6 +291,7 @@
       version: VERSION,
       viewMode: saved.viewMode === "all" || saved.viewMode === "paged" ? saved.viewMode : current.viewMode,
       commentEditor: null,
+      detailPopover: null,
       answers: Object.assign({}, current.answers)
     });
     if (Number.isInteger(saved.step)) next.step = Math.max(0, Math.min(saved.step, questions.length));
@@ -376,16 +375,11 @@
   }
 
   function serializeEvaluationAnswer(questionDef, answer) {
-    const selectedIds = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
-    const selected = selectedIds.map((id) => evaluationOptionPayload(questionDef, id)).filter(Boolean);
-    const payload = { select: questionDef.select };
+    const selected = answer.selected ? evaluationOptionPayload(questionDef, answer.selected) : null;
+    const payload = {};
     const optionCommentsList = optionComments(questionDef.options, answer.optionComments);
     const rowCommentsList = evaluationRowComments(questionDef.rows, answer.rowComments);
-    if (selected.length) {
-      payload.selected = selected.map((entry) => Object.assign({}, entry, {
-        rows: questionDef.rows.map((row) => evaluationRowPayload(row, entry.id)).filter(Boolean)
-      }));
-    }
+    if (selected) payload.selected = selected;
     if (optionCommentsList.length) payload.optionComments = optionCommentsList;
     if (rowCommentsList.length) payload.rowComments = rowCommentsList;
     return payload;
@@ -493,21 +487,7 @@
   }
 
   function appendEvaluationAnswer(lines, entry) {
-    if (entry.selected && entry.selected.length) {
-      lines.push("Selected:");
-      entry.selected.forEach((option) => lines.push(`- ${option.title}`));
-      entry.selected.forEach((option) => {
-        if (!option.rows || !option.rows.length) return;
-        lines.push("");
-        lines.push(`${option.title} details:`);
-        option.rows.forEach((row) => {
-          const cell = row.cell || {};
-          const value = [cell.icon, cell.text].filter(Boolean).join(" ");
-          const detail = cell.detail ? ` (${cell.detail})` : "";
-          lines.push(`- ${row.title}: ${value || "No value"}${detail}`);
-        });
-      });
-    }
+    if (entry.selected) lines.push(`Selected: ${entry.selected.title}`);
     appendComments(lines, entry.optionComments || [], "Column comments:");
     appendComments(lines, entry.rowComments || [], "Feature row comments:");
   }
@@ -573,9 +553,8 @@
         : Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
     },
     evaluation(questionDef, answer) {
-      const selected = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
       return Boolean(
-        selected.length ||
+        answer.selected ||
         optionComments(questionDef.options, answer.optionComments).length ||
         evaluationRowComments(questionDef.rows, answer.rowComments).length
       );
@@ -861,7 +840,7 @@
     .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
     .ih-html-preview .ih-mini-callout { border-left: 0; padding: 8px 10px; background: var(--ih-surface-2); color: var(--ih-ink); }
     .ih-evaluation-board {
-      --ih-evaluation-column-width: 190px;
+      --ih-evaluation-column-width: 238px;
       min-width: 0;
       border-radius: var(--ih-radius);
       background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
@@ -869,7 +848,6 @@
     }
     .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
-    .ih-evaluation-selection { display: flex; align-items: center; gap: 8px; color: var(--ih-muted); font-size: 12px; font-weight: 760; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; white-space: nowrap; }
     .ih-evaluation-frame { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; scrollbar-width: thin; }
     .ih-evaluation-table {
       width: max(100%, calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
@@ -881,34 +859,65 @@
     .ih-evaluation-feature-col { width: 430px; }
     .ih-evaluation-option-col { width: var(--ih-evaluation-column-width); }
     .ih-evaluation-table th, .ih-evaluation-table td { border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 72%, transparent); border-right: 1px solid color-mix(in srgb, var(--ih-line) 48%, transparent); padding: 11px 12px; text-align: left; vertical-align: top; }
+    .ih-evaluation-table td { vertical-align: middle; }
     .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
     .ih-evaluation-table thead th { position: sticky; top: 0; z-index: 3; background: var(--ih-surface); padding: 10px; }
-    .ih-evaluation-table thead th.is-selected, .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 10%, var(--ih-surface)); }
-    .ih-evaluation-table thead th:first-child, .ih-evaluation-table tbody th:not(.ih-evaluation-group-cell) { position: sticky; left: 0; z-index: 4; box-shadow: 1px 0 0 color-mix(in srgb, var(--ih-line) 56%, transparent); }
+    .ih-evaluation-table thead th.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
+    .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 7%, var(--ih-surface)); }
+    .ih-evaluation-table thead th:first-child, .ih-evaluation-table tbody th { position: sticky; left: 0; z-index: 4; box-shadow: 1px 0 0 color-mix(in srgb, var(--ih-line) 56%, transparent); }
     .ih-evaluation-table tbody th:not(.ih-evaluation-group-cell) { z-index: 2; }
-    .ih-evaluation-feature-head { color: var(--ih-muted); font-size: 12px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
-    .ih-evaluation-column-head { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
-    .ih-evaluation-column { min-width: 0; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; border: 0; border-radius: var(--ih-radius); background: transparent; color: var(--ih-ink); padding: 6px; text-align: left; }
-    .ih-evaluation-column.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
+    .ih-evaluation-feature-head { color: var(--ih-muted); }
+    .ih-evaluation-table thead th[data-action] { cursor: pointer; }
+    .ih-evaluation-table thead th[data-action]:focus-visible { outline: 3px solid var(--ih-accent-soft); outline-offset: -3px; }
+    .ih-evaluation-column { min-width: 0; width: 100%; display: grid; gap: 6px; color: inherit; }
+    .ih-evaluation-column-main { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
     .ih-evaluation-column-title { min-width: 0; font-size: 14px; font-weight: 850; line-height: 1.18; overflow-wrap: normal; word-break: normal; hyphens: auto; }
-    .ih-evaluation-column-tags { grid-column: 2; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+    .ih-evaluation-column-tags { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
     .ih-evaluation-column-tag { max-width: 100%; border-radius: 999px; background: color-mix(in srgb, var(--ih-ink) 8%, transparent); color: currentColor; opacity: .74; padding: 3px 6px; font-size: 10px; font-weight: 760; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ih-evaluation-column-head > .ih-comment-button { margin-top: 5px; }
     .ih-evaluation-group-row th { background: color-mix(in srgb, var(--ih-ink) 6%, var(--ih-surface-2)); color: var(--ih-accent); font-size: 12px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; padding: 8px 12px; }
-    .ih-evaluation-group-cell { position: static; }
+    .ih-evaluation-group-row td { background: color-mix(in srgb, var(--ih-ink) 4%, var(--ih-surface-2)); padding: 8px 0; }
+    .ih-evaluation-group-cell { z-index: 3; }
     .ih-evaluation-table tbody th { background: color-mix(in srgb, var(--ih-surface) 80%, var(--ih-bg)); }
     .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
     .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
-    .ih-evaluation-radio { width: 14px; height: 14px; border-radius: 999px; border: 2px solid currentColor; color: var(--ih-muted); display: inline-block; flex: 0 0 auto; }
-    .ih-evaluation-radio.is-selected { border-color: var(--ih-accent-ink); background: radial-gradient(circle, var(--ih-accent-ink) 42%, transparent 46%); color: var(--ih-accent-ink); }
-    .ih-evaluation-selection .ih-evaluation-radio.is-selected { border-color: var(--ih-accent); background: radial-gradient(circle, var(--ih-accent) 42%, transparent 46%); }
-    .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 9px; background: var(--ih-surface-2); color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.2; max-width: 100%; overflow-wrap: normal; word-break: normal; }
-    .ih-evaluation-cell svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
-    .ih-evaluation-cell[data-icon="yes"] { color: var(--ih-good); }
+    .ih-evaluation-cell-shell { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.25; max-width: 100%; overflow-wrap: normal; word-break: normal; }
+    .ih-evaluation-cell svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+    .ih-evaluation-cell[data-icon="yes"] { color: color-mix(in srgb, var(--ih-good) 78%, var(--ih-muted)); }
     .ih-evaluation-cell[data-icon="no"] { color: var(--ih-danger); }
-    .ih-evaluation-cell[data-icon="partial"], .ih-evaluation-cell[data-icon="warn"] { color: var(--ih-warn); }
+    .ih-evaluation-cell[data-icon="partial"] { color: var(--ih-muted); }
+    .ih-evaluation-cell[data-icon="warn"] { color: color-mix(in srgb, var(--ih-warn) 72%, var(--ih-muted)); }
     .ih-evaluation-cell[data-icon="unknown"] { color: var(--ih-muted); }
-    .ih-evaluation-cell[data-icon="best"] { color: var(--ih-accent); }
+    .ih-evaluation-cell[data-icon="best"] { color: #ffd966; font-weight: 950; }
+    .ih-evaluation-cell[data-icon="best"] svg {
+      width: 19px;
+      height: 19px;
+      fill: #ffd23f;
+      stroke: #5a3d00;
+      stroke-width: 1.35;
+      filter: drop-shadow(0 0 8px rgb(255 210 63 / 46%));
+    }
+    .ih-evaluation-detail-button {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 auto;
+      display: inline-grid;
+      place-items: center;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: color-mix(in srgb, var(--ih-muted) 82%, var(--ih-surface));
+      padding: 0;
+      cursor: help;
+    }
+    .ih-evaluation-detail-button svg {
+      width: 17px;
+      height: 17px;
+      fill: currentColor;
+      display: block;
+    }
+    .ih-evaluation-table td.is-selected .ih-evaluation-detail-button { color: color-mix(in srgb, var(--ih-accent) 58%, var(--ih-muted)); }
+    .ih-evaluation-detail-button:hover { color: var(--ih-muted); }
     .ih-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 14px; }
     .ih-add-row textarea { min-height: 70px; }
     .ih-add-row .ih-btn { justify-self: start; }
@@ -1015,6 +1024,35 @@
     .ih-comment-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
     .ih-comment-head h3 { margin: 0; font-size: 16px; }
     .ih-comment-popover textarea { min-height: 150px; max-height: 55vh; width: 100%; resize: none; line-height: 1.45; }
+    .ih-evaluation-tooltip {
+      position: fixed;
+      z-index: 70;
+      width: var(--ih-tooltip-width, 340px);
+      left: var(--ih-tooltip-left, 12px);
+      top: var(--ih-tooltip-top, 12px);
+      border: 1px solid var(--ih-line-strong);
+      border-radius: 8px;
+      background: var(--ih-code-bg);
+      color: var(--ih-code-ink);
+      box-shadow: var(--ih-shadow);
+      padding: 9px 10px;
+      pointer-events: none;
+    }
+    .ih-evaluation-tooltip.is-above { transform: translateY(-100%); }
+    .ih-evaluation-tooltip::before {
+      content: "";
+      position: absolute;
+      left: var(--ih-tooltip-arrow, 18px);
+      width: 10px;
+      height: 10px;
+      background: var(--ih-code-bg);
+      border: 1px solid var(--ih-line-strong);
+      transform: translateX(-50%) rotate(45deg);
+    }
+    .ih-evaluation-tooltip.is-below::before { top: -6px; border-right: 0; border-bottom: 0; }
+    .ih-evaluation-tooltip.is-above::before { bottom: -6px; border-left: 0; border-top: 0; }
+    .ih-evaluation-tooltip-title { margin: 0 0 4px; color: var(--ih-accent); font-size: 11px; font-weight: 850; line-height: 1.2; }
+    .ih-evaluation-tooltip-body { margin: 0; font-size: 12px; font-weight: 650; line-height: 1.42; white-space: pre-wrap; }
 
     @media (max-width: 900px) {
       .ih-topbar-inner, .ih-export { grid-template-columns: 1fr; }
@@ -1022,8 +1060,7 @@
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ih-evaluation-board { --ih-evaluation-column-width: 176px; }
-      .ih-evaluation-selection { flex-wrap: wrap; white-space: normal; }
+      .ih-evaluation-board { --ih-evaluation-column-width: 220px; }
       .ih-bottom-inner { align-items: stretch; }
     }
     @media (max-width: 680px) {
@@ -1180,16 +1217,12 @@
   }
 
   function renderEvaluation(questionDef, answer) {
-    const selectedIds = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
-    const selection = questionDef.options.map((entry) => `
-      <span class="ih-evaluation-radio ${selectedIds.includes(entry.id) ? "is-selected" : ""}"></span>
-      <span>${escapeHTML(entry.title)}</span>
-    `).join("");
+    const selectedIds = asArray(answer.selected ? [answer.selected] : []);
     const body = [];
     let previousGroup = null;
     questionDef.rows.forEach((row) => {
       if (row.group && row.group !== previousGroup) {
-        body.push(`<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell" colspan="${questionDef.options.length + 1}">${escapeHTML(row.group)}</th></tr>`);
+        body.push(`<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell">${escapeHTML(row.group)}</th><td colspan="${questionDef.options.length}"></td></tr>`);
         previousGroup = row.group;
       }
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
@@ -1197,8 +1230,7 @@
     return `
       <div class="ih-evaluation-board">
         <div class="ih-evaluation-head">
-          <p class="ih-evaluation-note">Select by column. Comment on columns or feature rows when the comparison needs clarification.</p>
-          <div class="ih-evaluation-selection">${selection}</div>
+          <p class="ih-evaluation-note">Select one column. Comment on columns or feature rows when the comparison needs clarification.</p>
         </div>
         <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
           <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
@@ -1208,7 +1240,7 @@
             </colgroup>
             <thead>
               <tr>
-                <th class="ih-evaluation-feature-head">Feature rows</th>
+                <th class="ih-evaluation-feature-head" aria-label="Rows"></th>
                 ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
               </tr>
             </thead>
@@ -1222,14 +1254,13 @@
   function renderEvaluationColumn(questionDef, answer, entry, isSelected) {
     const bodyText = richPlainText(entry.body);
     return `
-      <th class="${isSelected ? "is-selected" : ""}">
-        <div class="ih-evaluation-column-head">
-          <button class="ih-evaluation-column ${isSelected ? "is-selected" : ""}" type="button" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" aria-pressed="${isSelected ? "true" : "false"}" ${bodyText ? `title="${escapeAttr(bodyText)}"` : ""}>
-            <span class="ih-evaluation-radio ${isSelected ? "is-selected" : ""}"></span>
+      <th class="${isSelected ? "is-selected" : ""}" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" tabindex="0" role="button" aria-pressed="${isSelected ? "true" : "false"}" ${bodyText ? `title="${escapeAttr(bodyText)}"` : ""}>
+        <div class="ih-evaluation-column ${isSelected ? "is-selected" : ""}">
+          <div class="ih-evaluation-column-main">
             <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
-            ${renderEvaluationColumnTags(entry.tags)}
-          </button>
-          ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+            ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+          </div>
+          ${renderEvaluationColumnTags(entry.tags)}
         </div>
       </th>
     `;
@@ -1262,9 +1293,18 @@
   function renderEvaluationCell(cell) {
     const icon = isEvaluationIcon(cell && cell.icon) ? cell.icon : "";
     const text = cell && cell.text ? cell.text : evaluationIconLabel(icon);
-    const detail = cell && cell.detail ? ` title="${escapeAttr(cell.detail)}"` : "";
-    if (!icon && !text) return `<span class="ih-evaluation-cell">-</span>`;
-    return `<span class="ih-evaluation-cell" data-icon="${escapeAttr(icon)}"${detail}>${icon ? evaluationIcon(icon) : ""}${text ? `<span>${escapeHTML(text)}</span>` : ""}</span>`;
+    const detail = cell && cell.detail ? String(cell.detail) : "";
+    const label = text || evaluationIconLabel(icon) || "value";
+    const value = icon || text
+      ? `<span class="ih-evaluation-cell" data-icon="${escapeAttr(icon)}">${icon ? evaluationIcon(icon) : ""}${text ? `<span>${escapeHTML(text)}</span>` : ""}</span>`
+      : `<span class="ih-evaluation-cell">-</span>`;
+    if (!detail) return value;
+    return `
+      <span class="ih-evaluation-cell-shell">
+        ${value}
+        <span class="ih-evaluation-detail-button" data-detail-title="${escapeAttr(label)}" data-detail="${escapeAttr(detail)}" aria-label="Details for ${escapeAttr(label)}">${infoIcon()}</span>
+      </span>
+    `;
   }
 
   function renderRank(questionDef, answer) {
@@ -1526,6 +1566,10 @@
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
   }
 
+  function infoIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M12 3.75a8.25 8.25 0 1 0 0 16.5 8.25 8.25 0 0 0 0-16.5Zm-1.05 6.75h2.1v6h-2.1v-6Zm0-3h2.1v2h-2.1v-2Z"/></svg>`;
+  }
+
   function trashIcon() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`;
   }
@@ -1611,11 +1655,18 @@
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
       this.root.addEventListener("keydown", (event) => this.onKeydown(event));
+      this.root.addEventListener("mouseover", (event) => this.onMouseover(event));
+      this.root.addEventListener("mousemove", (event) => this.onMousemove(event));
+      this.root.addEventListener("mouseout", (event) => this.onMouseout(event));
       this.root.addEventListener("scroll", (event) => {
         if (event.target.closest && event.target.closest(".ih-move-dropdown")) return;
         this.closeMoveMenus();
+        if (this.state.detailPopover) this.closeDetail();
       }, true);
-      global.addEventListener("resize", () => this.closeMoveMenus());
+      global.addEventListener("resize", () => {
+        this.closeMoveMenus();
+        if (this.state.detailPopover) this.closeDetail();
+      });
     }
 
     render() {
@@ -1704,6 +1755,28 @@
       if (action === "remove-added") return this.removeAdded(actionEl.dataset.optionId || numberOr(actionEl.dataset.addedIndex, -1), context);
     }
 
+    onMouseover(event) {
+      const button = event.target.closest(".ih-evaluation-detail-button");
+      if (!button || !this.root.contains(button)) return;
+      if (button.contains(event.relatedTarget)) return;
+      this.showEvaluationDetail(button);
+    }
+
+    onMousemove(event) {
+      if (!this.state.detailPopover) return;
+      if (event.target.closest(".ih-evaluation-detail-button")) return;
+      this.closeDetail();
+    }
+
+    onMouseout(event) {
+      if (!this.state.detailPopover) return;
+      const source = event.target.closest(".ih-evaluation-detail-button");
+      if (!source || !this.root.contains(source)) return;
+      const related = event.relatedTarget && event.relatedTarget.closest && event.relatedTarget.closest(".ih-evaluation-detail-button");
+      if (related && this.root.contains(related)) return;
+      this.closeDetail();
+    }
+
     onInput(event) {
       const input = event.target.closest("[data-input]");
       if (!input || !this.root.contains(input)) return;
@@ -1735,12 +1808,13 @@
 
     onKeydown(event) {
       if (event.key === "Escape") {
-        if (this.state.commentEditor) this.closeComment();
+        if (this.state.detailPopover) this.closeDetail();
+        else if (this.state.commentEditor) this.closeComment();
         else if (this.closeMoveMenus()) event.preventDefault();
       }
       const choice = event.target.closest(".ih-choice[data-action]");
       if (choice && isFormControl(event.target)) return;
-      const evaluation = event.target.closest(".ih-evaluation-column[data-action]");
+      const evaluation = event.target.closest("[data-action='choose-evaluation-option']");
       if ((!choice && !evaluation) || !["Enter", " "].includes(event.key)) return;
       event.preventDefault();
       (choice || evaluation).click();
@@ -1804,6 +1878,7 @@
       if (this.config.questions.length <= 1) return;
       this.state.viewMode = this.viewMode() === "all" ? "paged" : "all";
       this.state.commentEditor = null;
+      this.state.detailPopover = null;
       this.save();
       this.render();
       global.scrollTo({ top: 0, behavior: "smooth" });
@@ -1818,6 +1893,7 @@
         kind: button.dataset.commentKind || "option-comment",
         optionId: button.dataset.optionId || ""
       };
+      this.state.detailPopover = null;
       this.save();
       this.render();
     }
@@ -1826,6 +1902,82 @@
       this.state.commentEditor = null;
       this.save();
       this.render();
+    }
+
+    showEvaluationDetail(button) {
+      const title = button.dataset.detailTitle || "Detail";
+      const detail = button.dataset.detail || "";
+      if (!detail) return;
+      const position = this.evaluationTooltipPosition(button);
+      this.state.commentEditor = null;
+      this.state.detailPopover = {
+        title,
+        detail,
+        left: position.left,
+        top: position.top,
+        width: position.width,
+        arrow: position.arrow,
+        placement: position.placement
+      };
+      this.renderDetailTooltip();
+    }
+
+    closeDetail() {
+      this.state.detailPopover = null;
+      const tooltip = this.root.querySelector(".ih-evaluation-tooltip");
+      if (tooltip) tooltip.remove();
+    }
+
+    evaluationTooltipPosition(button) {
+      const rect = button.getBoundingClientRect();
+      const viewportWidth = global.innerWidth || document.documentElement.clientWidth || 360;
+      const viewportHeight = global.innerHeight || document.documentElement.clientHeight || 640;
+      const margin = 12;
+      const gap = 8;
+      const width = Math.max(180, Math.min(340, viewportWidth - margin * 2));
+      const center = rect.left + rect.width / 2;
+      const left = clamp(center - width / 2, margin, viewportWidth - width - margin);
+      const hasBelowRoom = viewportHeight - rect.bottom >= 140 || rect.bottom < rect.top;
+      const placement = hasBelowRoom ? "below" : "above";
+      const top = placement === "above"
+        ? clamp(rect.top - gap, margin, viewportHeight - margin)
+        : clamp(rect.bottom + gap, margin, viewportHeight - margin);
+      return {
+        left: Math.round(left),
+        top: Math.round(top),
+        width: Math.round(width),
+        arrow: Math.round(clamp(center - left, 14, width - 14)),
+        placement
+      };
+    }
+
+    renderDetailTooltip() {
+      const detail = this.state.detailPopover;
+      if (!detail) return this.closeDetail();
+      let tooltip = this.root.querySelector(".ih-evaluation-tooltip");
+      if (!tooltip) {
+        tooltip = document.createElement("aside");
+        tooltip.className = "ih-evaluation-tooltip";
+        tooltip.setAttribute("role", "tooltip");
+        tooltip.tabIndex = -1;
+        this.root.querySelector(".ih-app")?.appendChild(tooltip);
+      }
+      tooltip.className = `ih-evaluation-tooltip is-${detail.placement === "above" ? "above" : "below"}`;
+      tooltip.style.setProperty("--ih-tooltip-left", `${numberOr(detail.left, 12)}px`);
+      tooltip.style.setProperty("--ih-tooltip-top", `${numberOr(detail.top, 12)}px`);
+      tooltip.style.setProperty("--ih-tooltip-width", `${numberOr(detail.width, 340)}px`);
+      tooltip.style.setProperty("--ih-tooltip-arrow", `${numberOr(detail.arrow, 18)}px`);
+      tooltip.replaceChildren();
+      if (detail.title) {
+        const title = document.createElement("p");
+        title.className = "ih-evaluation-tooltip-title";
+        title.textContent = detail.title;
+        tooltip.appendChild(title);
+      }
+      const body = document.createElement("p");
+      body.className = "ih-evaluation-tooltip-body";
+      body.textContent = detail.detail || "";
+      tooltip.appendChild(body);
     }
 
     syncOpenCommentButton() {
@@ -1997,14 +2149,7 @@
       const answer = context && context.answer;
       const questionDef = context && context.questionDef;
       if (!answer || !questionDef || questionDef.type !== "evaluation") return;
-      if (questionDef.select === "many") {
-        const selected = new Set(asArray(answer.selected));
-        if (selected.has(optionId)) selected.delete(optionId);
-        else selected.add(optionId);
-        answer.selected = Array.from(selected);
-      } else {
-        answer.selected = optionId;
-      }
+      answer.selected = optionId;
       this.refreshEvaluationState(context);
       this.markChanged(answer);
     }
@@ -2164,33 +2309,19 @@
       if (!questionDef || questionDef.type !== "evaluation") return;
       const section = this.sectionForContext(context);
       if (!section) return;
-      const selected = questionDef.select === "many" ? asArray(answer.selected) : asArray(answer.selected ? [answer.selected] : []);
-      section.querySelectorAll(".ih-evaluation-column[data-option-id]").forEach((button) => {
-        const isSelected = selected.includes(button.dataset.optionId);
-        button.classList.toggle("is-selected", isSelected);
-        button.setAttribute("aria-pressed", isSelected ? "true" : "false");
-        const head = button.closest("th");
-        if (head) head.classList.toggle("is-selected", isSelected);
-        button.querySelectorAll(".ih-evaluation-radio").forEach((dot) => dot.classList.toggle("is-selected", isSelected));
+      const selected = asArray(answer.selected ? [answer.selected] : []);
+      section.querySelectorAll(".ih-evaluation-table thead th[data-option-id]").forEach((head) => {
+        const isSelected = selected.includes(head.dataset.optionId);
+        head.classList.toggle("is-selected", isSelected);
+        head.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        const column = head.querySelector(".ih-evaluation-column");
+        if (column) column.classList.toggle("is-selected", isSelected);
       });
       section.querySelectorAll(".ih-evaluation-table td").forEach((cell) => {
         const cellIndex = cell.cellIndex - 1;
         const option = questionDef.options[cellIndex];
         cell.classList.toggle("is-selected", Boolean(option && selected.includes(option.id)));
       });
-      section.querySelector(".ih-evaluation-selection")?.replaceChildren(...this.evaluationSelectionNodes(questionDef, selected));
-    }
-
-    evaluationSelectionNodes(questionDef, selected) {
-      const nodes = [];
-      questionDef.options.forEach((entry) => {
-        const dot = document.createElement("span");
-        dot.className = `ih-evaluation-radio ${selected.includes(entry.id) ? "is-selected" : ""}`;
-        const label = document.createElement("span");
-        label.textContent = entry.title;
-        nodes.push(dot, label);
-      });
-      return nodes;
     }
 
     syncRankDom(context) {
@@ -2485,7 +2616,7 @@
   const questionAnsweredChecks = {
     text: (_questionDef, answer) => Boolean(String(answer.answer || "").trim()),
     choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
-    evaluation: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
+    evaluation: (_questionDef, answer) => Boolean(answer.selected),
     rank: (questionDef, answer) => Boolean(answer.touched) && asArray(answer.order).length >= questionDef.options.length,
     bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id])),
     classify: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.states && answer.states[entry.id])),
@@ -2505,16 +2636,6 @@
   function evaluationOptionPayload(questionDef, id) {
     const entry = questionDef.options.find((candidate) => candidate.id === id);
     return entry ? { id: entry.id, title: entry.title } : null;
-  }
-
-  function evaluationRowPayload(row, optionId) {
-    const cell = row.cells && row.cells[optionId];
-    if (!cell || (!cell.icon && !cell.text && !cell.detail)) return null;
-    const payload = { id: row.id, title: row.title, cell: {} };
-    if (cell.icon) payload.cell.icon = cell.icon;
-    if (cell.text) payload.cell.text = cell.text;
-    if (cell.detail) payload.cell.detail = cell.detail;
-    return payload;
   }
 
   function evaluationRowComments(rows, comments) {
