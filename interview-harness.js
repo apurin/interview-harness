@@ -619,9 +619,6 @@
     }
 
     .ih-topbar {
-      position: sticky;
-      top: 0;
-      z-index: 20;
       border-bottom: 0;
       background: color-mix(in srgb, var(--ih-bg) 92%, transparent);
       box-shadow: 0 1px 0 rgb(255 255 255 / 4%), 0 12px 28px rgb(8 14 13 / 16%);
@@ -844,11 +841,24 @@
       min-width: 0;
       border-radius: var(--ih-radius);
       background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
-      overflow: hidden;
+      overflow: visible;
     }
     .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
-    .ih-evaluation-frame { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; scrollbar-width: thin; }
+    .ih-evaluation-header-frame {
+      position: sticky;
+      top: 0;
+      z-index: 12;
+      max-width: 100%;
+      overflow: hidden;
+      background: var(--ih-surface);
+    }
+    .ih-evaluation-frame {
+      overflow-x: auto;
+      max-width: 100%;
+      overscroll-behavior-x: contain;
+      scrollbar-width: thin;
+    }
     .ih-evaluation-table {
       width: max(100%, calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
       min-width: calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)));
@@ -861,7 +871,7 @@
     .ih-evaluation-table th, .ih-evaluation-table td { border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 72%, transparent); border-right: 1px solid color-mix(in srgb, var(--ih-line) 48%, transparent); padding: 11px 12px; text-align: left; vertical-align: top; }
     .ih-evaluation-table td { vertical-align: middle; }
     .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
-    .ih-evaluation-table thead th { position: sticky; top: 0; z-index: 3; background: var(--ih-surface); padding: 10px; }
+    .ih-evaluation-table thead th { background: var(--ih-surface); padding: 10px; }
     .ih-evaluation-table thead th.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
     .ih-evaluation-table td.is-selected { background: color-mix(in srgb, var(--ih-accent) 7%, var(--ih-surface)); }
     .ih-evaluation-table thead th:first-child, .ih-evaluation-table tbody th { position: sticky; left: 0; z-index: 4; box-shadow: 1px 0 0 color-mix(in srgb, var(--ih-line) 56%, transparent); }
@@ -871,6 +881,7 @@
     .ih-evaluation-table thead th[data-action]:focus-visible { outline: 3px solid var(--ih-accent-soft); outline-offset: -3px; }
     .ih-evaluation-column { min-width: 0; width: 100%; display: grid; gap: 6px; color: inherit; }
     .ih-evaluation-column-main { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+    .ih-evaluation-column-actions { display: inline-flex; align-items: center; gap: 2px; }
     .ih-evaluation-column-title { min-width: 0; font-size: 14px; font-weight: 850; line-height: 1.18; overflow-wrap: normal; word-break: normal; hyphens: auto; }
     .ih-evaluation-column-tags { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
     .ih-evaluation-column-tag { max-width: 100%; border-radius: 999px; background: color-mix(in srgb, var(--ih-ink) 8%, transparent); color: currentColor; opacity: .74; padding: 3px 6px; font-size: 10px; font-weight: 760; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -917,7 +928,11 @@
       display: block;
     }
     .ih-evaluation-table td.is-selected .ih-evaluation-detail-button { color: color-mix(in srgb, var(--ih-accent) 58%, var(--ih-muted)); }
+    .ih-evaluation-table thead .ih-evaluation-detail-button { width: 20px; height: 20px; color: currentColor; opacity: .62; }
+    .ih-evaluation-table thead .ih-evaluation-detail-button svg { width: 15px; height: 15px; }
+    .ih-evaluation-table thead th.is-selected .ih-evaluation-detail-button { color: currentColor; opacity: .76; }
     .ih-evaluation-detail-button:hover { color: var(--ih-muted); }
+    .ih-evaluation-table thead .ih-evaluation-detail-button:hover { color: currentColor; opacity: 1; }
     .ih-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 14px; }
     .ih-add-row textarea { min-height: 70px; }
     .ih-add-row .ih-btn { justify-self: start; }
@@ -1232,7 +1247,7 @@
         <div class="ih-evaluation-head">
           <p class="ih-evaluation-note">Select one column. Comment on columns or feature rows when the comparison needs clarification.</p>
         </div>
-        <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
+        <div class="ih-evaluation-header-frame" data-evaluation-header-frame>
           <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
             <colgroup>
               <col class="ih-evaluation-feature-col">
@@ -1244,6 +1259,14 @@
                 ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
               </tr>
             </thead>
+          </table>
+        </div>
+        <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
+          <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
+            <colgroup>
+              <col class="ih-evaluation-feature-col">
+              ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
+            </colgroup>
             <tbody>${body.join("")}</tbody>
           </table>
         </div>
@@ -1254,11 +1277,14 @@
   function renderEvaluationColumn(questionDef, answer, entry, isSelected) {
     const bodyText = richPlainText(entry.body);
     return `
-      <th class="${isSelected ? "is-selected" : ""}" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" tabindex="0" role="button" aria-pressed="${isSelected ? "true" : "false"}" ${bodyText ? `title="${escapeAttr(bodyText)}"` : ""}>
+      <th class="${isSelected ? "is-selected" : ""}" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" tabindex="0" role="button" aria-pressed="${isSelected ? "true" : "false"}">
         <div class="ih-evaluation-column ${isSelected ? "is-selected" : ""}">
           <div class="ih-evaluation-column-main">
             <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
-            ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+            <span class="ih-evaluation-column-actions">
+              ${bodyText ? `<span class="ih-evaluation-detail-button" data-detail-title="${escapeAttr(entry.title)}" data-detail="${escapeAttr(bodyText)}" aria-label="Details for ${escapeAttr(entry.title)}">${infoIcon()}</span>` : ""}
+              ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
+            </span>
           </div>
           ${renderEvaluationColumnTags(entry.tags)}
         </div>
@@ -1642,6 +1668,7 @@
       this.sortables = [];
       this.codeEditors = [];
       this.frameObjectUrls = [];
+      this.evaluationScrollCleanups = [];
       this.exportTimer = null;
       this.toastTimer = null;
       this.load();
@@ -1680,6 +1707,7 @@
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
         this.syncRankDom();
         this.initFrameLinks();
+        this.initEvaluationHeaderScroll();
         this.initSortables();
         this.initCodeEditors();
         const comment = this.root.querySelector("[data-input='comment-modal']");
@@ -1722,6 +1750,7 @@
     }
 
     onClick(event) {
+      if (event.target.closest(".ih-evaluation-detail-button")) return;
       if (!event.target.closest(".ih-move-menu")) this.closeMoveMenus();
       const linkEl = event.target.closest("a[href]");
       if (linkEl && this.root.contains(linkEl)) return;
@@ -2001,10 +2030,26 @@
         try { view.destroy(); } catch (_) {}
       });
       this.codeEditors = [];
+      this.evaluationScrollCleanups.forEach((cleanup) => {
+        try { cleanup(); } catch (_) {}
+      });
+      this.evaluationScrollCleanups = [];
       this.frameObjectUrls.forEach((url) => {
         try { global.URL.revokeObjectURL(url); } catch (_) {}
       });
       this.frameObjectUrls = [];
+    }
+
+    initEvaluationHeaderScroll() {
+      this.root.querySelectorAll(".ih-evaluation-board").forEach((board) => {
+        const frame = board.querySelector(".ih-evaluation-frame");
+        const header = board.querySelector("[data-evaluation-header-frame]");
+        if (!frame || !header) return;
+        const sync = () => { header.scrollLeft = frame.scrollLeft; };
+        frame.addEventListener("scroll", sync, { passive: true });
+        this.evaluationScrollCleanups.push(() => frame.removeEventListener("scroll", sync));
+        sync();
+      });
     }
 
     initFrameLinks() {
