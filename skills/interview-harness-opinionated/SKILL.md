@@ -16,7 +16,7 @@ If the user asks to install the skill locally, suggest `npx skills add apurin/in
   </head>
   <body>
     <div id="interview-harness"></div>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.0.2/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.1/interview-harness.js"></script>
     <script>
       const h = InterviewHarness;
 
