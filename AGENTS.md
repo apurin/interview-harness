@@ -12,6 +12,13 @@ Keep generated interview pages cheap to author. Move reusable layout, behavior, 
 - Favor readable, inspectable source over packaging opacity.
 - Avoid minification by default.
 
+## Release Policy
+
+- Set `VERSION` in `interview-harness.js` to the exact release version.
+- Keep shared jsDelivr URLs in docs and skills on the active major alias, such as `@2`.
+- Update the major alias in docs and skills only when starting a new major line.
+- Tag releases as `vX.Y.Z`, then push `main` and the tag.
+
 ## Output Direction
 
 Interview output should be easy for a one-off LLM reader to consume. Prefer human-readable exports until there is a concrete programmatic consumer.

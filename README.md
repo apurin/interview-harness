@@ -13,11 +13,11 @@ The output is a temporary HTML artifact. The library carries layout, state, navi
 
 ## Usage
 
-Create one HTML file that loads the pinned browser library from jsDelivr.
+Create one HTML file that loads the major-pinned browser library from jsDelivr.
 
 ```html
 <div id="interview-harness"></div>
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/interview-harness.js"></script>
 <script>
   const h = InterviewHarness;
 
@@ -79,22 +79,25 @@ Open the HTML file in a browser. No build step is required.
 Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files.
 
 - Use Git tags as release versions.
-- Use exact tags in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/interview-harness.js`.
-- Avoid `@main`, omitted versions, and other floating URLs in shared artifacts.
+- Use the active major version in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/interview-harness.js`.
+- Use exact tags only for frozen archival artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v2.0.0/interview-harness.js`.
+- Avoid `@latest`, `@main`, omitted versions, and mutable tag aliases in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
 
 Release requirements:
 
 - Set `VERSION` in `interview-harness.js` to the release version.
-- Update every pinned CDN URL in `README.md` and `skills/*/SKILL.md` to the same tag.
+- Keep public CDN URLs in `README.md` and `skills/*/SKILL.md` on the active major alias, such as `@2`.
+- When starting a new major version, update those public CDN URLs to the new major alias before tagging the first release.
 - Run `node --check interview-harness.js`.
 - Commit all release files before tagging.
-- Create the matching Git tag, then push both `main` and the tag; jsDelivr serves the CDN release from the pushed tag.
+- Create the matching Git tag, then push both `main` and the tag; jsDelivr serves the major alias from the newest matching semver tag.
+- Purge or verify the major-alias URLs after pushing when a release should be visible immediately.
 
 Remote skill reference:
 
 ```text
-https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/skills/interview-harness-opinionated/SKILL.md
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/skills/interview-harness-opinionated/SKILL.md
 ```
 
 ## Question API

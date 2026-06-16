@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "1.1.2";
+  const VERSION = "2.0.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";

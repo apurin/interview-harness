@@ -1,9 +1,9 @@
 ---
 name: interview-harness-opinionated
-description: Create rich interactive interviews for users as sharable HTML files. A pinned CDN helper library takes care of layout, styling, interview state, output, cards, syntax highlighting, iframe previews, and option comments. Instructs how to structure, pace, and write useful interviews.
+description: Create rich interactive interviews for users as sharable HTML files. A major-pinned CDN helper library takes care of layout, styling, interview state, output, cards, syntax highlighting, iframe previews, and option comments. Instructs how to structure, pace, and write useful interviews.
 ---
 
-Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
+Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the major-pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
 
 If the user asks to install the skill locally, suggest `npx skills add apurin/interview-harness --list` to review available interview-harness skills.
 
@@ -16,7 +16,7 @@ If the user asks to install the skill locally, suggest `npx skills add apurin/in
   </head>
   <body>
     <div id="interview-harness"></div>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v1.1.2/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/interview-harness.js"></script>
     <script>
       const h = InterviewHarness;
 
