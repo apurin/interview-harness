@@ -17,7 +17,7 @@ Create one HTML file that loads the major-pinned browser library from jsDelivr.
 
 ```html
 <div id="interview-harness"></div>
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/interview-harness.js"></script>
 <script>
   const h = InterviewHarness;
 
@@ -79,25 +79,24 @@ Open the HTML file in a browser. No build step is required.
 Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files.
 
 - Use Git tags as release versions.
-- Use the active major version in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/interview-harness.js`.
-- Use exact tags only for frozen archival artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v2.0.0/interview-harness.js`.
-- Avoid `@latest`, `@main`, omitted versions, and mutable tag aliases in shared artifacts.
+- Use the active major version in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/interview-harness.js`.
+- Use exact tags only for frozen archival artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v3.0.0/interview-harness.js`.
+- Use `@latest` only for fetching the newest skill source; generated interview HTML should stay on the active major alias.
+- Avoid `@main`, omitted versions, and mutable non-semver aliases in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
 
-Release requirements:
+Release command:
 
-- Set `VERSION` in `interview-harness.js` to the release version.
-- Keep public CDN URLs in `README.md` and `skills/*/SKILL.md` on the active major alias, such as `@2`.
-- When starting a new major version, update those public CDN URLs to the new major alias before tagging the first release.
-- Run `node --check interview-harness.js`.
-- Commit all release files before tagging.
-- Create the matching Git tag, then push both `main` and the tag; jsDelivr serves the major alias from the newest matching semver tag.
-- Purge or verify the major-alias URLs after pushing when a release should be visible immediately.
+```sh
+node scripts/release.mjs 3.0.0
+```
+
+The release script updates `VERSION`, renders `skills/*/SKILL.md` from `templates/skills/*/SKILL.md`, keeps public CDN URLs on the active major alias, checks the library syntax, commits the known release files, tags `vX.Y.Z`, pushes `main` and the tag, then purges and verifies jsDelivr URLs for the exact tag, active major, and `@latest`.
 
 Remote skill reference:
 
 ```text
-https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/skills/interview-harness/SKILL.md
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/skills/interview-harness/SKILL.md
 ```
 
 ## Question API

@@ -14,10 +14,9 @@ Keep generated interview pages cheap to author. Move reusable layout, behavior, 
 
 ## Release Policy
 
-- Set `VERSION` in `interview-harness.js` to the exact release version.
-- Keep shared jsDelivr URLs in docs and skills on the active major alias, such as `@2`.
-- Update the major alias in docs and skills only when starting a new major line.
-- Tag releases as `vX.Y.Z`, then push `main` and the tag.
+- Release with `node scripts/release.mjs X.Y.Z`.
+- The release script sets `VERSION`, renders skills from templates, keeps shared jsDelivr URLs on the active major alias, commits release files, tags `vX.Y.Z`, pushes `main` and the tag, and refreshes jsDelivr.
+- Update skill templates when the public authoring surface changes; do not hand-edit generated skill files for release content.
 
 ## Output Direction
 
