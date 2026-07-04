@@ -5,7 +5,7 @@ description: Create rich interactive interviews for users as sharable HTML files
 
 Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the major-pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
 
-Current rendered release: Interview Harness v3.0.0 on CDN major `3`.
+Current rendered release: Interview Harness v3.0.1 on CDN major `3`.
 
 If the user asks to install the skill locally, suggest `npx skills add apurin/interview-harness --list` to review available interview-harness skills.
 

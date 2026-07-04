@@ -80,7 +80,7 @@ Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files
 
 - Use Git tags as release versions.
 - Use the active major version in generated artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/interview-harness.js`.
-- Use exact tags only for frozen archival artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v3.0.0/interview-harness.js`.
+- Use exact tags only for frozen archival artifacts, such as `https://cdn.jsdelivr.net/gh/apurin/interview-harness@vX.Y.Z/interview-harness.js`.
 - Use `@latest` only for fetching the newest skill source; generated interview HTML should stay on the active major alias.
 - Avoid `@main`, omitted versions, and mutable non-semver aliases in shared artifacts.
 - Keep npm packaging out of scope until there is a concrete need for npm installation, package metadata, or ecosystem discovery.
@@ -88,10 +88,10 @@ Interview Harness uses jsDelivr's GitHub CDN endpoint for shared interview files
 Release command:
 
 ```sh
-node scripts/release.mjs 3.0.0
+node scripts/release.mjs X.Y.Z
 ```
 
-The release script updates `VERSION`, renders `skills/*/SKILL.md` from `templates/skills/*/SKILL.md`, keeps public CDN URLs on the active major alias, checks the library syntax, commits the known release files, tags `vX.Y.Z`, pushes `main` and the tag, then purges and verifies jsDelivr URLs for the exact tag, active major, and `@latest`.
+The release script updates `VERSION`, renders `skills/*/SKILL.md` from `templates/skills/*/SKILL.md`, checks the library syntax, commits the current worktree, tags `vX.Y.Z`, pushes `main` and the tag, purges jsDelivr URLs for the active major and `@latest`, then fetches the exact tag, active major, and `@latest`.
 
 Remote skill reference:
 
