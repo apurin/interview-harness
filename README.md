@@ -7,8 +7,8 @@ The output is a temporary HTML artifact. The library carries layout, state, navi
 ## Files
 
 - `interview-harness.js`: the browser library.
-- `skills/interview-harness/SKILL.md`: neutral authoring instructions.
-- `skills/interview-harness-opinionated/SKILL.md`: opinionated authoring instructions and examples.
+- `skills/interview-harness/SKILL.md`: opinionated authoring instructions and examples.
+- `skills/interview-harness-min/SKILL.md`: minimal authoring instructions.
 - `AGENTS.md`: project guidance for agents working in this repository.
 
 ## Usage
@@ -97,7 +97,7 @@ Release requirements:
 Remote skill reference:
 
 ```text
-https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/skills/interview-harness-opinionated/SKILL.md
+https://cdn.jsdelivr.net/gh/apurin/interview-harness@2/skills/interview-harness/SKILL.md
 ```
 
 ## Question API
