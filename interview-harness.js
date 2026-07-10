@@ -939,6 +939,10 @@
     .ih-flow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; }
     .ih-flow-danger { color: var(--ih-danger); }
     .ih-flow-danger .ih-shortcut-key { margin-left: 1px; }
+    .ih-flow-history-button { width: 32px; height: 32px; background: transparent; }
+    .ih-flow-history-button svg { width: 20px; height: 20px; display: block; }
+    .ih-flow-history-button:hover:not(:disabled) { background: transparent; color: color-mix(in srgb, var(--ih-accent) 56%, var(--ih-muted)); }
+    .ih-flow-history-button:disabled { opacity: .38; cursor: not-allowed; }
     .ih-flow-tip { margin: 0; color: var(--ih-muted); font-size: 12px; line-height: 1.4; }
     .ih-flow-tip .ih-shortcut-key { display: inline-flex; align-items: center; justify-content: center; margin: 0 2px; vertical-align: 1px; }
     .ih-flow .ih-shortcut-key { display: inline-flex; align-items: center; justify-content: center; }
@@ -1127,7 +1131,7 @@
             <h2 class="ih-prompt">${escapeHTML(questionDef.prompt)}</h2>
           </div>
         </div>
-        ${renderQuestionBody(questionDef, instance.state.answers[questionDef.id])}
+        ${renderQuestionBody(questionDef, instance.state.answers[questionDef.id], instance)}
       </section>
     `;
   }
@@ -1140,8 +1144,8 @@
     edit: renderEdit
   };
 
-  function renderQuestionBody(questionDef, answer) {
-    return questionRenderers[questionDef.type](questionDef, answer);
+  function renderQuestionBody(questionDef, answer, instance) {
+    return questionRenderers[questionDef.type](questionDef, answer, instance);
   }
 
   function renderChoice(questionDef, answer) {
@@ -1372,11 +1376,11 @@
     `;
   }
 
-  function renderFlow(questionDef, answer) {
+  function renderFlow(questionDef, answer, instance) {
     const selected = normalizeFlowSelection(answer.selected, answer);
     const hasSelection = Boolean(selected);
     const deleteHint = ` <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌫</span></kbd>`;
-    const hasStructuralChanges = isFlowStructurallyChanged(questionDef, answer);
+    const history = instance ? instance.flowHistoryFor(questionDef.id) : { undo: [], redo: [] };
     return `
       <div class="ih-card ih-flow" data-flow>
         <div class="ih-flow-toolbar">
@@ -1384,7 +1388,8 @@
             <div class="ih-flow-actions">
               <button class="ih-btn" type="button" data-action="flow-show-add">Add</button>
               <button class="ih-btn ih-flow-danger" type="button" data-action="flow-delete" ${hasSelection ? "" : "disabled"}>Delete${deleteHint}</button>
-              <button class="ih-btn" type="button" data-action="flow-revert" ${hasStructuralChanges ? "" : "disabled"}>Revert</button>
+              <button class="ih-icon-btn ih-flow-history-button" type="button" data-action="flow-undo" aria-label="Undo" title="Undo (Command-Z)" ${history.undo.length ? "" : "disabled"}>${undoIcon()}</button>
+              <button class="ih-icon-btn ih-flow-history-button" type="button" data-action="flow-redo" aria-label="Redo" title="Redo (Shift-Command-Z)" ${history.redo.length ? "" : "disabled"}>${redoIcon()}</button>
               <button class="ih-btn" type="button" data-action="flow-arrange">Arrange</button>
             </div>
             ${renderCommentButton("flow-comment", "", answer.comment || "", "Comment on flow")}
@@ -1533,6 +1538,14 @@
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M18 3a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4h-4.724l-4.762 2.857a1 1 0 0 1-1.508-.743L7 21v-2H6a4 4 0 0 1-3.995-3.8L2 15V7a4 4 0 0 1 4-4zm-4 9H8a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2m2-4H8a1 1 0 1 0 0 2h8a1 1 0 0 0 0-2"/></svg>`;
   }
 
+  function undoIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 14-4-4 4-4"/><path d="M5 10h11a4 4 0 0 1 0 8h-1"/></svg>`;
+  }
+
+  function redoIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 4-4-4-4"/><path d="M19 10H8a4 4 0 0 0 0 8h1"/></svg>`;
+  }
+
   function moveIcon() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M6.707 3.293a1 1 0 0 1 .083 1.32l-.083.094L5.415 6H10a1 1 0 0 1 .117 1.993L10 8H5.415l1.292 1.293a1 1 0 0 1 .083 1.32l-.083.094a1 1 0 0 1-1.32.083l-.094-.083l-3-3a1.008 1.008 0 0 1-.097-.112l-.071-.11l-.054-.114l-.035-.105l-.025-.118l-.007-.058L2 7l.003-.075l.017-.126l.03-.111l.044-.111l.052-.098l.064-.092l.083-.094l3-3a1 1 0 0 1 1.414 0"/><path d="m18.613 3.21l.094.083l3 3a.927.927 0 0 1 .097.112l.071.11l.054.114l.035.105l.03.148L22 7l-.003.075l-.017.126l-.03.111l-.044.111l-.052.098l-.074.104l-.073.082l-3 3a1 1 0 0 1-1.497-1.32l.083-.094L18.585 8H14a1 1 0 0 1-.117-1.993L14 6h4.585l-1.292-1.293a1 1 0 0 1-.083-1.32l.083-.094a1 1 0 0 1 1.32-.083"/><path d="M18 13H6a3 3 0 0 0-3 3v2a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-2a3 3 0 0 0-3-3"/></svg>`;
   }
@@ -1643,6 +1656,7 @@
       this.chromeFrame = null;
       this.sortables = [];
       this.flowEditors = [];
+      this.flowHistories = new Map();
       this.codeEditors = [];
       this.frameObjectUrls = [];
       this.evaluationScrollCleanups = [];
@@ -1659,6 +1673,7 @@
       this.root.addEventListener("click", (event) => this.onClick(event));
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
+      this.root.addEventListener("focusout", (event) => this.onFocusout(event));
       global.document.addEventListener("keydown", this.onDocumentKeydown);
       this.root.addEventListener("mouseover", (event) => this.onMouseover(event));
       this.root.addEventListener("mousemove", (event) => this.onMousemove(event));
@@ -1675,6 +1690,7 @@
     }
 
     render() {
+      this.finishFlowHistoryTransactions();
       this.destroyEnhancements();
       renderApp(this);
       this.afterRender();
@@ -1762,7 +1778,8 @@
       if (action === "flow-cancel-add") return this.hideFlowAdd(context);
       if (action === "flow-commit-add") return this.addFlowNode(context);
       if (action === "flow-delete") return this.deleteFlowSelection(context);
-      if (action === "flow-revert") return this.revertFlow(context);
+      if (action === "flow-undo") return this.undoFlow(context);
+      if (action === "flow-redo") return this.redoFlow(context);
       if (action === "flow-arrange") return this.arrangeFlow(context);
     }
 
@@ -1806,11 +1823,22 @@
       if (!questionDef || !answer) return;
 
       if (kind === "flow-selected-value") {
-        if (input.dataset.flowKind === "connection" || event.type === "change") this.updateFlowSelectedValue(input, context);
+        if (input.dataset.flowKind === "connection") {
+          const selected = normalizeFlowSelection(answer.selected, answer);
+          this.beginFlowHistoryTransaction(context, `connection-label:${selected && selected.key || ""}`);
+          this.updateFlowSelectedValue(input, context);
+          if (event.type === "change") this.finishFlowHistoryTransaction(context);
+        } else if (event.type === "change") {
+          this.updateFlowSelectedValue(input, context);
+        }
         return;
       }
 
       if (kind === "comment-modal" && this.state.commentEditor) {
+        if (questionDef.type === "flow") {
+          const editor = this.state.commentEditor;
+          this.beginFlowHistoryTransaction(context, `comment:${editor.kind}:${editor.optionId}`);
+        }
         setCommentValue(answer, this.state.commentEditor.kind, this.state.commentEditor.optionId, input.value);
         this.syncOpenCommentButton();
       }
@@ -1819,6 +1847,12 @@
 
       autoGrowTextarea(input);
       this.markChanged(answer, true);
+    }
+
+    onFocusout(event) {
+      const input = event.target.closest && event.target.closest("[data-input='flow-selected-value'][data-flow-kind='connection']");
+      if (!input || !this.root.contains(input)) return;
+      this.finishFlowHistoryTransaction(this.contextFromNode(input));
     }
 
     onKeydown(event) {
@@ -1839,6 +1873,15 @@
         event.preventDefault();
         this.hideFlowAdd(this.contextFromNode(flowInput));
         return;
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "z" && !isTextEntryControl(event.target)) {
+        const context = this.contextFromNode(event.target);
+        if (context && context.questionDef.type === "flow") {
+          event.preventDefault();
+          if (event.shiftKey) this.redoFlow(context);
+          else this.undoFlow(context);
+          return;
+        }
       }
       if (["Delete", "Backspace"].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !isTextEntryControl(event.target)) {
         const context = this.contextFromNode(event.target);
@@ -1961,6 +2004,9 @@
     }
 
     closeComment() {
+      const editor = this.state.commentEditor;
+      const context = editor && this.contextByQuestionId(editor.questionId);
+      if (context && context.questionDef.type === "flow") this.finishFlowHistoryTransaction(context);
       this.state.commentEditor = null;
       this.save();
       this.render();
@@ -2219,6 +2265,7 @@
               this.toast("Those nodes are already connected.");
               return;
             }
+            this.recordFlowHistory(context);
             const connection = { from, to };
             answer.connections.push(connection);
             answer.adding = false;
@@ -2301,6 +2348,98 @@
       return this.flowEditors.find((editor) => editor.questionId === questionId) || null;
     }
 
+    flowHistoryFor(questionId) {
+      if (!this.flowHistories.has(questionId)) {
+        this.flowHistories.set(questionId, { undo: [], redo: [], transaction: null });
+      }
+      return this.flowHistories.get(questionId);
+    }
+
+    finishFlowHistoryTransactions() {
+      this.flowHistories.forEach((history, questionId) => {
+        if (history.transaction) this.finishFlowHistoryTransaction(this.contextByQuestionId(questionId));
+      });
+    }
+
+    pushFlowUndoSnapshot(history, snapshot) {
+      const previous = history.undo[history.undo.length - 1];
+      if (!previous || !sameFlowHistorySnapshot(previous, snapshot)) {
+        history.undo.push(cloneFlowHistorySnapshot(snapshot));
+        if (history.undo.length > 100) history.undo.shift();
+      }
+    }
+
+    beginFlowHistoryTransaction(context, key) {
+      if (!context || context.questionDef.type !== "flow") return;
+      const history = this.flowHistoryFor(context.questionDef.id);
+      if (history.transaction && history.transaction.key === key) return;
+      if (history.transaction) this.finishFlowHistoryTransaction(context);
+      history.transaction = { key, snapshot: flowHistorySnapshot(context.answer) };
+    }
+
+    finishFlowHistoryTransaction(context) {
+      if (!context || context.questionDef.type !== "flow") return;
+      const history = this.flowHistoryFor(context.questionDef.id);
+      const transaction = history.transaction;
+      if (!transaction) return;
+      history.transaction = null;
+      const current = flowHistorySnapshot(context.answer);
+      if (!sameFlowHistorySnapshot(transaction.snapshot, current)) {
+        this.pushFlowUndoSnapshot(history, transaction.snapshot);
+        history.redo = [];
+      }
+      this.refreshFlowToolbar(context);
+    }
+
+    recordFlowHistory(context) {
+      if (!context || context.questionDef.type !== "flow") return;
+      this.finishFlowHistoryTransaction(context);
+      const history = this.flowHistoryFor(context.questionDef.id);
+      this.pushFlowUndoSnapshot(history, flowHistorySnapshot(context.answer));
+      history.redo = [];
+      this.refreshFlowToolbar(context);
+    }
+
+    restoreFlowHistorySnapshot(context, snapshot) {
+      const answer = context.answer;
+      const positions = safeObject(answer.positions);
+      answer.nodes = cloneFlowHistorySnapshot(snapshot.nodes);
+      answer.connections = cloneFlowHistorySnapshot(snapshot.connections);
+      answer.comment = String(snapshot.comment || "");
+      answer.positions = normalizeFlowPositions(positions, answer.nodes);
+      answer.selected = null;
+      answer.adding = false;
+      answer.touched = isFlowChanged(context.questionDef, answer);
+    }
+
+    undoFlow(context) {
+      if (!context || context.questionDef.type !== "flow") return;
+      this.finishFlowHistoryTransaction(context);
+      const history = this.flowHistoryFor(context.questionDef.id);
+      if (!history.undo.length) return;
+      const current = flowHistorySnapshot(context.answer);
+      const previous = history.undo.pop();
+      history.redo.push(cloneFlowHistorySnapshot(current));
+      this.restoreFlowHistorySnapshot(context, previous);
+      this.activateContext(context);
+      this.save();
+      this.render();
+    }
+
+    redoFlow(context) {
+      if (!context || context.questionDef.type !== "flow") return;
+      this.finishFlowHistoryTransaction(context);
+      const history = this.flowHistoryFor(context.questionDef.id);
+      if (!history.redo.length) return;
+      const current = flowHistorySnapshot(context.answer);
+      const next = history.redo.pop();
+      this.pushFlowUndoSnapshot(history, current);
+      this.restoreFlowHistorySnapshot(context, next);
+      this.activateContext(context);
+      this.save();
+      this.render();
+    }
+
     rememberFlowPositions(editor) {
       if (!editor) return;
       const context = this.contextByQuestionId(editor.questionId);
@@ -2314,6 +2453,7 @@
     refreshFlowSelection(context) {
       const section = this.sectionForContext(context);
       if (!section || !context || context.questionDef.type !== "flow") return;
+      this.finishFlowHistoryTransaction(context);
       const selection = section.querySelector("[data-flow-selection]");
       if (selection) selection.innerHTML = renderFlowSelection(context.answer);
       this.refreshFlowToolbar(context);
@@ -2328,8 +2468,11 @@
         remove.disabled = !selected;
         remove.innerHTML = `Delete <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌫</span></kbd>`;
       }
-      const revert = section.querySelector("[data-action='flow-revert']");
-      if (revert) revert.disabled = !isFlowStructurallyChanged(context.questionDef, context.answer);
+      const history = this.flowHistoryFor(context.questionDef.id);
+      const undo = section.querySelector("[data-action='flow-undo']");
+      const redo = section.querySelector("[data-action='flow-redo']");
+      if (undo) undo.disabled = !history.undo.length;
+      if (redo) redo.disabled = !history.redo.length;
     }
 
     showFlowAdd(context) {
@@ -2357,6 +2500,7 @@
       const name = input && input.value.trim();
       if (!name) return this.toast("Write the node name first.");
       if (flowNodeByName(context.answer, name)) return this.toast("That node name is already used.");
+      this.recordFlowHistory(context);
       this.rememberFlowPositions(this.flowEditorFor(context.questionDef.id));
       const positions = Object.values(safeObject(context.answer.positions));
       const newPosition = positions.length
@@ -2382,42 +2526,17 @@
       if (selected.kind === "node") {
         const attached = answer.connections.filter((connection) => connection.from === selected.name || connection.to === selected.name);
         if (attached.length && !global.confirm(`Delete ${selected.name} and ${attached.length} connected ${attached.length === 1 ? "connection" : "connections"}?`)) return;
+        this.recordFlowHistory(context);
         answer.nodes = answer.nodes.filter((node) => node.name !== selected.name);
         answer.connections = answer.connections.filter((connection) => connection.from !== selected.name && connection.to !== selected.name);
         delete answer.positions[selected.name];
       } else {
+        this.recordFlowHistory(context);
         answer.connections = answer.connections.filter((connection) => flowPairKey(connection.from, connection.to) !== selected.key);
       }
       answer.selected = null;
       this.activateContext(context);
       this.saveChanged(answer);
-      this.render();
-    }
-
-    revertFlow(context) {
-      const answer = context && context.answer;
-      if (!answer || !isFlowStructurallyChanged(context.questionDef, answer)) return;
-      if (!global.confirm("Revert structural changes to the original flow?")) return;
-      const editor = this.flowEditorFor(context.questionDef.id);
-      if (editor) editor.skipRemember = true;
-      const initial = initialFlowAnswer(context.questionDef);
-      initial.comment = answer.comment || "";
-      initial.nodes.forEach((node) => {
-        const current = flowNodeByName(answer, node.name);
-        if (current && current.comment) node.comment = current.comment;
-      });
-      initial.connections.forEach((connection) => {
-        const current = flowConnectionByKey(answer, flowPairKey(connection.from, connection.to));
-        if (current && current.comment) connection.comment = current.comment;
-      });
-      answer.nodes = initial.nodes;
-      answer.connections = initial.connections;
-      answer.positions = {};
-      answer.selected = null;
-      answer.adding = false;
-      answer.touched = isFlowChanged(context.questionDef, answer);
-      this.activateContext(context);
-      this.save();
       this.render();
     }
 
@@ -2457,6 +2576,7 @@
         return this.toast("That node name is already used.");
       }
       if (value === node.name) return;
+      this.recordFlowHistory(context);
       this.rememberFlowPositions(this.flowEditorFor(context.questionDef.id));
       const previous = node.name;
       node.name = value;
@@ -2766,6 +2886,7 @@
       const viewMode = this.state.viewMode;
       this.state = createInitialState(this.config.questions);
       this.state.viewMode = viewMode;
+      this.flowHistories.clear();
       if (this.config.storageKey) {
         try {
           localStorage.removeItem(this.config.storageKey);
@@ -3089,6 +3210,28 @@
       }))
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     return { nodes, connections, comment: String(answer && answer.comment || "") };
+  }
+
+  function flowHistorySnapshot(answer) {
+    return {
+      nodes: normalizeFlowNodes(answer && answer.nodes, answer && answer.connections)
+        .map((node) => Object.assign({ name: node.name }, node.comment ? { comment: node.comment } : {})),
+      connections: normalizeFlowConnections(answer && answer.connections, false)
+        .map((connection) => Object.assign(
+          { from: connection.from, to: connection.to },
+          connection.label ? { label: connection.label } : {},
+          connection.comment ? { comment: connection.comment } : {}
+        )),
+      comment: String(answer && answer.comment || "")
+    };
+  }
+
+  function cloneFlowHistorySnapshot(snapshot) {
+    return JSON.parse(JSON.stringify(snapshot));
+  }
+
+  function sameFlowHistorySnapshot(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
   }
 
   function flowStructureSnapshot(answer) {

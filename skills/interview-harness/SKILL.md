@@ -45,7 +45,7 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`. Many-choice lets users add custom options.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Users can comment on columns and rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
-- `h.flow({ id, prompt, connections })`: review and correct a directed flow. Each connection is `{ from, to, label? }`; node names are inferred. Users can move nodes, Command-drag between nodes to connect them, delete the selected node or connection with Delete or Backspace, comment on the whole flow or individual elements, and revert structural edits.
+- `h.flow({ id, prompt, connections })`: review and correct a directed flow. Each connection is `{ from, to, label? }`; node names are inferred. Users can move nodes, Command-drag between nodes to connect them, delete the selected node or connection with Delete or Backspace, comment on the whole flow or individual elements, and undo or redo edits. Flow history is session-local; Command-Z and Shift-Command-Z work outside text fields.
 - `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact; use `h.code({ lang, value })` for the artifact.
 
 `cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans.
