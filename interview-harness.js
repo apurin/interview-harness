@@ -2202,10 +2202,13 @@
       host.textContent = "";
       const flowNodes = normalizeFlowNodes(answer.nodes, answer.connections);
       answer.positions = normalizeFlowPositions(answer.positions, flowNodes);
-      const fallbackPositions = defaultFlowPositions(flowNodes, answer.connections);
-      flowNodes.forEach((node) => {
-        if (!answer.positions[node.name]) answer.positions[node.name] = fallbackPositions[node.name];
-      });
+      const shouldAutoArrange = flowNodes.length > 0 && Object.keys(answer.positions).length === 0;
+      if (!shouldAutoArrange) {
+        const fallbackPositions = defaultFlowPositions(flowNodes, answer.connections);
+        flowNodes.forEach((node) => {
+          if (!answer.positions[node.name]) answer.positions[node.name] = fallbackPositions[node.name];
+        });
+      }
       const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name])));
       const edges = new vis.DataSet(normalizeFlowConnections(answer.connections, false).map(flowVisConnectionRecord));
       const network = new vis.Network(host, { nodes, edges }, {
@@ -2226,12 +2229,12 @@
         },
         layout: {
           hierarchical: {
-            enabled: false,
+            enabled: shouldAutoArrange,
             direction: "UD",
             sortMethod: "directed",
-            levelSeparation: 105,
-            nodeSpacing: 155,
-            treeSpacing: 190,
+            levelSeparation: 120,
+            nodeSpacing: 210,
+            treeSpacing: 240,
             blockShifting: true,
             edgeMinimization: true,
             parentCentralization: true
@@ -2336,11 +2339,28 @@
         answer.positions = Object.assign({}, safeObject(answer.positions), network.getPositions(params.nodes.map(String)));
         this.save();
       });
-      network.once("afterDrawing", () => {
+      const finishInitialDrawing = () => {
         network.fit({ animation: { duration: 320, easingFunction: "easeInOutQuad" } });
         const selected = normalizeFlowSelection(answer.selected, answer);
         if (selected && selected.kind === "node") network.selectNodes([selected.name], false);
         if (selected && selected.kind === "connection") network.selectEdges([selected.key]);
+      };
+      network.once("afterDrawing", () => {
+        if (shouldAutoArrange) {
+          answer.positions = normalizeFlowPositions(network.getPositions(), flowNodes);
+          network.setOptions({ layout: { improvedLayout: false, hierarchical: { enabled: false } } });
+          setTimeout(() => {
+            if (!host.isConnected) return;
+            network.setOptions({ physics: { enabled: false } });
+            network.stopSimulation();
+            Object.entries(answer.positions).forEach(([nodeId, position]) => network.moveNode(nodeId, position.x, position.y));
+            network.storePositions();
+            this.save();
+            finishInitialDrawing();
+          }, 0);
+          return;
+        }
+        finishInitialDrawing();
       });
     }
 
