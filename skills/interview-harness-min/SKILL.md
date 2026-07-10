@@ -45,6 +45,7 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`. Many-choice lets users add custom options.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Users can comment on columns and rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into named buckets.
+- `h.flow({ id, prompt, connections })`: review and correct a directed flow. Connections use `{ from, to, label? }`; node names are inferred. Users move nodes normally, Command-drag between nodes to connect them, and press Delete or Backspace to remove the selected node or connection.
 - `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact; use `h.code({ lang, value })` for the artifact.
 
 `cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans.
@@ -70,7 +71,7 @@ Do not ask the same decision through multiple helpers. For example, avoid pairin
 
 For option comparisons, prefer one `h.evaluation` with clear rows, option bodies, tags, and comments. The evaluation can be the whole artifact for that decision area.
 
-Use `bucket` only when categorized output is needed. Use `edit` only when the edited text or code is the deliverable.
+Use `bucket` only when categorized output is needed. Use `flow` only when the corrected flow is the deliverable; omit empty connection labels. Structural flow edits export the complete final flow, while comment-only feedback exports only comments. Use `edit` only when the edited text or code is the deliverable.
 
 Keep background material out of the interview by default. Include only context that is essential for the user to answer the questions. Put sources, reading material, extended reasoning, and static notes in the final response or another artifact. Do not create a question only to display them or a visualization.
 

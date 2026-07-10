@@ -58,6 +58,14 @@ Create one HTML file that loads the major-pinned browser library from jsDelivr.
           })
         ]
       }),
+      h.flow({
+        id: "fulfillment-flow",
+        prompt: "Review and correct this fulfillment flow.",
+        connections: [
+          { from: "Receive order", to: "Check inventory" },
+          { from: "Check inventory", to: "Reserve stock", label: "available" }
+        ]
+      }),
       h.edit({
         id: "draft",
         prompt: "Edit this draft.",
@@ -100,6 +108,7 @@ https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/skills/interview-harness/
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: single or multiple choice. `select` is `"one"` or `"many"`. `cardsPerRow` is `"auto"`, `1`, `2`, `3`, or `4`.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Use `h.feature({ id, title, body, group, cells })` for rows. Users can comment on columns and rows. Cell icons are `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, and `"best"`; add `text` or `detail` when an icon is not enough.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
+- `h.flow({ id, prompt, connections })`: review and correct a directed flow. Each connection has `from`, `to`, and an optional `label`; node names are inferred from the connections. Users can add, rename, move, and remove nodes; Command-drag between nodes to connect them; name or remove connections; press Delete or Backspace to remove the selected node or connection; comment on the whole flow, nodes, or connections; arrange the graph; and revert structural edits.
 - `h.edit({ id, prompt, artifact, language })`: editable code or text artifact.
 
 Short interviews show all questions by default. Longer interviews show one question per page. Users can switch views in the page.
@@ -124,6 +133,7 @@ The page exports a text answer summary containing only changed answers and user-
 - selected evaluation columns with their row values
 - added options
 - changed bucket assignments
+- corrected flows, including the complete final flow when its structure changed; comment-only reviews export only their comments
 - edited content changed from the original artifact
 - comments the user wrote
 
@@ -134,6 +144,7 @@ Untouched defaults stay out of the export.
 The library is standalone source, but it loads a few browser-side packages when a question needs them:
 
 - SortableJS `1.15.7` for bucket drag controls.
+- vis-network `10.1.0` for flow questions.
 - CodeMirror `6.0.2` for edit questions and code previews.
 - `@codemirror/lang-javascript` `6.2.5`, `@codemirror/lang-markdown` `6.5.0`, `@codemirror/lang-html` `6.4.11`, and `@codemirror/lang-json` `6.0.2` for syntax support.
 - `@codemirror/theme-one-dark` `6.1.3` for a consistent editor theme.

@@ -45,6 +45,7 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`. Many-choice lets users add custom options.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Users can comment on columns and rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
+- `h.flow({ id, prompt, connections })`: review and correct a directed flow. Each connection is `{ from, to, label? }`; node names are inferred. Users can move nodes, Command-drag between nodes to connect them, delete the selected node or connection with Delete or Backspace, comment on the whole flow or individual elements, and revert structural edits.
 - `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact; use `h.code({ lang, value })` for the artifact.
 
 `cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans.
@@ -97,6 +98,7 @@ Before finalizing, verify that all statements apply:
 - Use `evaluation` for vendor, framework, platform, tier, package, implementation, or design-option comparisons where rows are shared criteria and columns are selectable answers. Include recommendation signals in option tags, option bodies, and row cells. Do not add separate priority, shortlist, or final-choice questions for the same decision area.
 - Use `choice` for a small set of distinct routes where the user mainly needs to pick one. Use rich option bodies for tradeoffs or previews.
 - Use `bucket` only when the bucketed categories are the output: decide now/later, include/exclude, must/should/could, or similar planning groups.
+- Use `flow` when the corrected directed flow is the deliverable. Supply only connections; omit empty labels. Structural edits export the complete final flow, while comment-only feedback exports only the comments.
 - Use `edit` only when the edited text or code is the deliverable. Do not ask the user to edit a recommendation, shortlist, source list, or decision note unless that edited artifact is the requested output.
 - Keep sources, reading material, and static references outside the interview unless they are essential to a specific question. Do not make them a question.
 

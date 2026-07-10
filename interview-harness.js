@@ -9,6 +9,7 @@
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
+  const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
   const CODEMIRROR_URL = "https://esm.sh/codemirror@6.0.2";
   const CODEMIRROR_THEME_URL = "https://esm.sh/@codemirror/theme-one-dark@6.1.3";
   const CODEMIRROR_LANGS = {
@@ -20,6 +21,7 @@
     json: "https://esm.sh/@codemirror/lang-json@6.0.2"
   };
   let sortablePromise = null;
+  let visNetworkPromise = null;
   let codeMirrorPromise = null;
   let codeMirrorThemePromise = null;
   const codeMirrorLanguagePromises = {};
@@ -31,6 +33,7 @@
   const evaluation = tagged("type", "evaluation");
   const bucket = tagged("type", "bucket");
   const edit = tagged("type", "edit");
+  const flow = tagged("type", "flow");
   const frame = tagged("view", "frame");
   const html = tagged("view", "html");
   const code = tagged("view", "code");
@@ -57,6 +60,9 @@
     bucket: (raw) => ({
       buckets: normalizeBuckets(raw.buckets || ["yes", "maybe", "no"]),
       options: normalizeOptions(raw.options)
+    }),
+    flow: (raw) => ({
+      connections: normalizeFlowConnections(raw.connections, true)
     }),
     edit: (raw) => ({
       artifact: normalizeArtifact(raw.artifact || raw.body || raw.content || raw.value || ""),
@@ -178,6 +184,67 @@
     return { view: "code", lang: "", value: valueToText(input) };
   }
 
+  function normalizeFlowConnections(input, strict) {
+    const connections = [];
+    const usedPairs = new Set();
+    asArray(input).forEach((entry) => {
+      const raw = Object.assign({}, entry || {});
+      const from = String(raw.from || "").trim();
+      const to = String(raw.to || "").trim();
+      if (!from || !to) {
+        if (strict) throw new TypeError("Flow connections require non-empty from and to names.");
+        return;
+      }
+      const pair = flowPairKey(from, to);
+      if (usedPairs.has(pair)) {
+        if (strict) throw new TypeError(`Flow nodes may have only one connection between them: ${from} / ${to}`);
+        return;
+      }
+      usedPairs.add(pair);
+      const connection = { from, to };
+      const label = String(raw.label || raw.name || "").trim();
+      const comment = String(raw.comment || "");
+      if (label) connection.label = label;
+      if (comment) connection.comment = comment;
+      connections.push(connection);
+    });
+    return connections;
+  }
+
+  function normalizeFlowNodes(input, connections) {
+    const nodes = [];
+    const used = new Set();
+    const add = (entry) => {
+      const raw = typeof entry === "string" ? { name: entry } : Object.assign({}, entry || {});
+      const name = String(raw.name || raw.title || raw.label || "").trim();
+      if (!name || used.has(name)) return;
+      used.add(name);
+      const node = { name };
+      const comment = String(raw.comment || "");
+      if (comment) node.comment = comment;
+      nodes.push(node);
+    };
+    asArray(input).forEach(add);
+    asArray(connections).forEach((connection) => {
+      add(connection.from);
+      add(connection.to);
+    });
+    return nodes;
+  }
+
+  function initialFlowAnswer(questionDef) {
+    const connections = normalizeFlowConnections(questionDef.connections, false);
+    return {
+      nodes: normalizeFlowNodes([], connections),
+      connections,
+      comment: "",
+      positions: {},
+      selected: null,
+      adding: false,
+      touched: false
+    };
+  }
+
   // State and export logic ---------------------------------------------------
 
   const initialAnswers = {
@@ -186,6 +253,7 @@
       : { selected: "", comments: {} },
     evaluation: (_questionDef) => ({ selected: "", optionComments: {}, rowComments: {}, touched: false }),
     bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
+    flow: initialFlowAnswer,
     edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", touched: false })
   };
 
@@ -210,6 +278,20 @@
     bucket(questionDef, answer, saved, initial) {
       answer.buckets = Object.assign({}, initial.buckets, safeObject(saved.buckets));
       answer.touched = Boolean(Object.values(answer.buckets).some(Boolean) || commentCount(answer));
+    },
+    flow(questionDef, answer, saved, initial) {
+      const connections = Array.isArray(saved.connections)
+        ? normalizeFlowConnections(saved.connections, false)
+        : initial.connections;
+      answer.connections = connections;
+      answer.nodes = Array.isArray(saved.nodes)
+        ? normalizeFlowNodes(saved.nodes, connections)
+        : normalizeFlowNodes(initial.nodes, connections);
+      answer.comment = String(saved.comment || "");
+      answer.positions = normalizeFlowPositions(saved.positions, answer.nodes);
+      answer.selected = normalizeFlowSelection(saved.selected, answer);
+      answer.adding = false;
+      answer.touched = Boolean(saved.touched || isFlowChanged(questionDef, answer));
     },
     edit(questionDef, answer, saved) {
       answer.summary = String(saved.summary || "");
@@ -258,6 +340,7 @@
     choice: appendChoiceAnswer,
     evaluation: appendEvaluationAnswer,
     bucket: appendBucketAnswer,
+    flow: appendFlowAnswer,
     edit: appendEditAnswer
   };
 
@@ -334,6 +417,41 @@
     if (answer.summary) lines.push(`Overall comment: ${answer.summary}`);
   }
 
+  function appendFlowAnswer(lines, questionDef, answer) {
+    const nodes = normalizeFlowNodes(answer.nodes, answer.connections);
+    const connections = normalizeFlowConnections(answer.connections, false);
+    if (isFlowStructurallyChanged(questionDef, answer)) {
+      const connected = new Set();
+      connections.forEach((connection) => {
+        connected.add(connection.from);
+        connected.add(connection.to);
+      });
+      lines.push("Final flow:");
+      lines.push("```plantuml");
+      lines.push("@startuml");
+      nodes.filter((node) => !connected.has(node.name))
+        .forEach((node) => lines.push(`node "${flowExportText(node.name)}"`));
+      connections.forEach((connection) => {
+        const label = connection.label ? ` : ${flowExportText(connection.label)}` : "";
+        lines.push(`"${flowExportText(connection.from)}" --> "${flowExportText(connection.to)}"${label}`);
+      });
+      lines.push("@enduml");
+      lines.push("```");
+    }
+    if (answer.comment) lines.push(`Overall comment: ${answer.comment}`);
+    const comments = [];
+    nodes.filter((node) => node.comment).forEach((node) => {
+      comments.push(`- Node "${node.name}": ${node.comment}`);
+    });
+    connections.filter((connection) => connection.comment).forEach((connection) => {
+      comments.push(`- Connection "${connection.from}" --> "${connection.to}": ${connection.comment}`);
+    });
+    if (comments.length) {
+      lines.push("Comments:");
+      lines.push(...comments);
+    }
+  }
+
   function appendComments(lines, comments, heading) {
     if (!comments.length) return;
     lines.push(heading || "Comments:");
@@ -357,6 +475,7 @@
       Object.values(safeObject(answer.buckets)).some(Boolean) ||
       optionComments(questionDef.options, answer.comments).length
     ),
+    flow: isFlowChanged,
     edit: (questionDef, answer) => Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary)
   };
 
@@ -814,6 +933,33 @@
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
+    .ih-flow { padding: 0; overflow: hidden; }
+    .ih-flow-toolbar { display: grid; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--ih-line); background: var(--ih-surface-2); }
+    .ih-flow-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .ih-flow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .ih-flow-danger { color: var(--ih-danger); }
+    .ih-flow-danger .ih-shortcut-key { margin-left: 1px; }
+    .ih-flow-tip { margin: 0; color: var(--ih-muted); font-size: 12px; line-height: 1.4; }
+    .ih-flow-tip .ih-shortcut-key { display: inline-flex; align-items: center; justify-content: center; margin: 0 2px; vertical-align: 1px; }
+    .ih-flow .ih-shortcut-key { display: inline-flex; align-items: center; justify-content: center; }
+    .ih-flow-key-glyph { display: inline-block; font: 600 14px/1 -apple-system, BlinkMacSystemFont, "Segoe UI Symbol", sans-serif; }
+    .ih-flow-canvas {
+      position: relative;
+      width: 100%;
+      height: min(58vh, 620px);
+      min-height: 460px;
+      background:
+        linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
+        linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px),
+        var(--ih-code-bg);
+      background-size: 24px 24px;
+    }
+    .ih-flow-canvas canvas { outline: 0; }
+    .ih-flow-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ih-muted); font-size: 13px; }
+    .ih-flow-selection { min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--ih-line); background: var(--ih-surface-2); }
+    .ih-flow-selection-empty { grid-column: 1 / -1; margin: 0; color: var(--ih-muted); font-size: 13px; }
+    .ih-flow-selected-value { min-width: 0; }
+    .ih-flow-selection-actions { display: inline-flex; align-items: center; gap: 8px; }
     .ih-edit { display: grid; gap: 10px; }
     .ih-code-editor-host, .ih-code-fallback, .ih-code-viewer-host, .ih-code-viewer-fallback {
       min-height: 440px;
@@ -889,9 +1035,13 @@
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .ih-evaluation-board { --ih-evaluation-column-width: 275px; }
       .ih-bottom-inner { align-items: stretch; }
+      .ih-flow-toolbar-row { align-items: start; }
     }
     @media (max-width: 680px) {
       .ih-grid[data-cards-per-row] { grid-template-columns: minmax(0, 1fr); }
+      .ih-flow-selection { grid-template-columns: minmax(0, 1fr); }
+      .ih-flow-selection-actions { justify-self: start; }
+      .ih-flow-canvas { min-height: 400px; height: 60vh; }
     }
   `;
 
@@ -986,6 +1136,7 @@
     choice: renderChoice,
     evaluation: renderEvaluation,
     bucket: renderBucket,
+    flow: renderFlow,
     edit: renderEdit
   };
 
@@ -1221,6 +1372,63 @@
     `;
   }
 
+  function renderFlow(questionDef, answer) {
+    const selected = normalizeFlowSelection(answer.selected, answer);
+    const hasSelection = Boolean(selected);
+    const deleteHint = ` <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌫</span></kbd>`;
+    const hasStructuralChanges = isFlowStructurallyChanged(questionDef, answer);
+    return `
+      <div class="ih-card ih-flow" data-flow>
+        <div class="ih-flow-toolbar">
+          <div class="ih-flow-toolbar-row">
+            <div class="ih-flow-actions">
+              <button class="ih-btn" type="button" data-action="flow-show-add">Add</button>
+              <button class="ih-btn ih-flow-danger" type="button" data-action="flow-delete" ${hasSelection ? "" : "disabled"}>Delete${deleteHint}</button>
+              <button class="ih-btn" type="button" data-action="flow-revert" ${hasStructuralChanges ? "" : "disabled"}>Revert</button>
+              <button class="ih-btn" type="button" data-action="flow-arrange">Arrange</button>
+            </div>
+            ${renderCommentButton("flow-comment", "", answer.comment || "", "Comment on flow")}
+          </div>
+          <p class="ih-flow-tip">Drag nodes to move them. Hold <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌘</span></kbd> while dragging between nodes to connect them.</p>
+        </div>
+        <div class="ih-flow-canvas" data-flow-editor data-question-id="${escapeAttr(questionDef.id)}">
+          <span class="ih-flow-loading">Loading flow editor...</span>
+        </div>
+        <div class="ih-flow-selection" data-flow-selection>
+          ${renderFlowSelection(answer)}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderFlowSelection(answer) {
+    if (answer.adding) {
+      return `
+        <input class="ih-field ih-flow-selected-value" data-input="flow-new-node" placeholder="New node name" aria-label="New node name">
+        <div class="ih-flow-selection-actions">
+          <button class="ih-btn ih-btn-accent" type="button" data-action="flow-commit-add">Add</button>
+          <button class="ih-btn" type="button" data-action="flow-cancel-add">Cancel</button>
+        </div>
+      `;
+    }
+    const selected = normalizeFlowSelection(answer.selected, answer);
+    if (!selected) return `<p class="ih-flow-selection-empty">Select a node or connection.</p>`;
+    if (selected.kind === "node") {
+      const node = flowNodeByName(answer, selected.name);
+      if (!node) return `<p class="ih-flow-selection-empty">Select a node or connection.</p>`;
+      return `
+        <input class="ih-field ih-flow-selected-value" data-input="flow-selected-value" data-flow-kind="node" value="${escapeAttr(node.name)}" aria-label="Node name">
+        ${renderCommentButton("flow-node-comment", node.name, node.comment || "", `Comment on ${node.name}`)}
+      `;
+    }
+    const connection = flowConnectionByKey(answer, selected.key);
+    if (!connection) return `<p class="ih-flow-selection-empty">Select a node or connection.</p>`;
+    return `
+      <input class="ih-field ih-flow-selected-value" data-input="flow-selected-value" data-flow-kind="connection" value="${escapeAttr(connection.label || "")}" placeholder="Connection name (optional)" aria-label="Connection name from ${escapeAttr(connection.from)} to ${escapeAttr(connection.to)}">
+      ${renderCommentButton("flow-connection-comment", selected.key, connection.comment || "", `Comment on connection from ${connection.from} to ${connection.to}`)}
+    `;
+  }
+
   function renderExportStep(instance) {
     const text = instance.getText();
     return `
@@ -1367,6 +1575,15 @@
 
   function getCommentValue(answer, kind, optionId) {
     if (!answer) return "";
+    if (kind === "flow-comment") return answer.comment || "";
+    if (kind === "flow-node-comment") {
+      const node = flowNodeByName(answer, optionId);
+      return node && node.comment || "";
+    }
+    if (kind === "flow-connection-comment") {
+      const connection = flowConnectionByKey(answer, optionId);
+      return connection && connection.comment || "";
+    }
     if (kind === "evaluation-option-comment") return answer.optionComments && answer.optionComments[optionId] || "";
     if (kind === "evaluation-row-comment") return answer.rowComments && answer.rowComments[optionId] || "";
     if (kind === "edit-summary") return answer.summary || "";
@@ -1375,6 +1592,24 @@
 
   function setCommentValue(answer, kind, optionId, value) {
     const textValue = String(value || "");
+    if (kind === "flow-comment") {
+      answer.comment = textValue;
+      return;
+    }
+    if (kind === "flow-node-comment") {
+      const node = flowNodeByName(answer, optionId);
+      if (!node) return;
+      if (textValue.trim()) node.comment = textValue;
+      else delete node.comment;
+      return;
+    }
+    if (kind === "flow-connection-comment") {
+      const connection = flowConnectionByKey(answer, optionId);
+      if (!connection) return;
+      if (textValue.trim()) connection.comment = textValue;
+      else delete connection.comment;
+      return;
+    }
     if (kind === "evaluation-option-comment") {
       if (!answer.optionComments) answer.optionComments = {};
       if (textValue.trim()) answer.optionComments[optionId] = textValue;
@@ -1407,6 +1642,7 @@
       this.saveTimer = null;
       this.chromeFrame = null;
       this.sortables = [];
+      this.flowEditors = [];
       this.codeEditors = [];
       this.frameObjectUrls = [];
       this.evaluationScrollCleanups = [];
@@ -1450,6 +1686,7 @@
         this.initFrameLinks();
         this.initEvaluationHeaderScroll();
         this.initSortables();
+        this.initFlowEditors();
         this.initCodeEditors();
         const comment = this.root.querySelector("[data-input='comment-modal']");
         if (comment) {
@@ -1521,6 +1758,12 @@
       if (action === "move-bucket-option") return this.moveBucketOption(actionEl, context);
       if (action === "add-option") return this.addOption(context);
       if (action === "remove-added") return this.removeAdded(actionEl.dataset.optionId || numberOr(actionEl.dataset.addedIndex, -1), context);
+      if (action === "flow-show-add") return this.showFlowAdd(context);
+      if (action === "flow-cancel-add") return this.hideFlowAdd(context);
+      if (action === "flow-commit-add") return this.addFlowNode(context);
+      if (action === "flow-delete") return this.deleteFlowSelection(context);
+      if (action === "flow-revert") return this.revertFlow(context);
+      if (action === "flow-arrange") return this.arrangeFlow(context);
     }
 
     onMouseover(event) {
@@ -1553,6 +1796,7 @@
         autoGrowTextarea(input);
         return;
       }
+      if (kind === "flow-new-node") return;
       const context = kind === "comment-modal" && this.state.commentEditor
         ? this.contextByQuestionId(this.state.commentEditor.questionId)
         : this.contextFromNode(input);
@@ -1560,6 +1804,11 @@
       const questionDef = context && context.questionDef;
       const answer = context && context.answer;
       if (!questionDef || !answer) return;
+
+      if (kind === "flow-selected-value") {
+        if (input.dataset.flowKind === "connection" || event.type === "change") this.updateFlowSelectedValue(input, context);
+        return;
+      }
 
       if (kind === "comment-modal" && this.state.commentEditor) {
         setCommentValue(answer, this.state.commentEditor.kind, this.state.commentEditor.optionId, input.value);
@@ -1573,6 +1822,35 @@
     }
 
     onKeydown(event) {
+      const flowInput = event.target && event.target.closest && event.target.closest("[data-input='flow-selected-value'], [data-input='flow-new-node']");
+      if (flowInput && event.key === "Enter") {
+        event.preventDefault();
+        if (flowInput.dataset.input === "flow-new-node") {
+          const section = flowInput.closest(".ih-step[data-question-id]");
+          const button = section && section.querySelector("[data-action='flow-commit-add']");
+          if (button) button.click();
+        } else {
+          if (flowInput.dataset.flowKind === "node") this.updateFlowSelectedValue(flowInput, this.contextFromNode(flowInput));
+          if (flowInput.isConnected) flowInput.blur();
+        }
+        return;
+      }
+      if (flowInput && flowInput.dataset.input === "flow-new-node" && event.key === "Escape") {
+        event.preventDefault();
+        this.hideFlowAdd(this.contextFromNode(flowInput));
+        return;
+      }
+      if (["Delete", "Backspace"].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !isTextEntryControl(event.target)) {
+        const context = this.contextFromNode(event.target);
+        const selected = context && context.questionDef.type === "flow"
+          ? normalizeFlowSelection(context.answer.selected, context.answer)
+          : null;
+        if (selected) {
+          event.preventDefault();
+          this.deleteFlowSelection(context);
+          return;
+        }
+      }
       if (event.key === "Escape") {
         if (this.state.detailPopover) this.closeDetail();
         else if (this.state.commentEditor) this.closeComment();
@@ -1781,6 +2059,12 @@
         try { sortable.destroy(); } catch (_) {}
       });
       this.sortables = [];
+      this.flowEditors.forEach((editor) => {
+        if (!editor.skipRemember) this.rememberFlowPositions(editor);
+        try { if (editor.cleanup) editor.cleanup(); } catch (_) {}
+        try { editor.network.destroy(); } catch (_) {}
+      });
+      this.flowEditors = [];
       this.codeEditors.forEach((view) => {
         try { view.destroy(); } catch (_) {}
       });
@@ -1849,6 +2133,345 @@
           }
         });
       }).catch(() => {});
+    }
+
+    initFlowEditors() {
+      const hosts = Array.from(this.root.querySelectorAll("[data-flow-editor]"));
+      if (!hosts.length) return;
+      ensureVisNetwork().then((vis) => {
+        hosts.forEach((host) => {
+          if (host.isConnected) this.initFlowEditor(host, vis);
+        });
+      }).catch(() => {
+        hosts.forEach((host) => {
+          if (host.isConnected) host.innerHTML = `<span class="ih-flow-loading">Flow editor unavailable.</span>`;
+        });
+      });
+    }
+
+    initFlowEditor(host, vis) {
+      const context = this.contextFromNode(host);
+      if (!context || context.questionDef.type !== "flow") return;
+      const answer = context.answer;
+      host.textContent = "";
+      const flowNodes = normalizeFlowNodes(answer.nodes, answer.connections);
+      answer.positions = normalizeFlowPositions(answer.positions, flowNodes);
+      const fallbackPositions = defaultFlowPositions(flowNodes, answer.connections);
+      flowNodes.forEach((node) => {
+        if (!answer.positions[node.name]) answer.positions[node.name] = fallbackPositions[node.name];
+      });
+      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name])));
+      const edges = new vis.DataSet(normalizeFlowConnections(answer.connections, false).map(flowVisConnectionRecord));
+      const network = new vis.Network(host, { nodes, edges }, {
+        autoResize: true,
+        nodes: {
+          shape: "box",
+          margin: { top: 12, right: 15, bottom: 12, left: 15 },
+          widthConstraint: { minimum: 126, maximum: 190 },
+          font: { color: "#eef1ec", size: 13, face: "Inter, system-ui, sans-serif", multi: false },
+          shapeProperties: { borderRadius: 4 },
+          chosen: { node: true, label: false }
+        },
+        edges: {
+          font: { color: "#dfe8e3", size: 11, face: "Inter, system-ui, sans-serif", background: "#202625", strokeWidth: 0, align: "horizontal" },
+          selectionWidth: 2.4,
+          hoverWidth: 1.5,
+          chosen: { edge: true, label: false }
+        },
+        layout: {
+          hierarchical: {
+            enabled: false,
+            direction: "UD",
+            sortMethod: "directed",
+            levelSeparation: 105,
+            nodeSpacing: 155,
+            treeSpacing: 190,
+            blockShifting: true,
+            edgeMinimization: true,
+            parentCentralization: true
+          }
+        },
+        physics: false,
+        interaction: { hover: true, multiselect: false, dragNodes: true, dragView: true, zoomView: true },
+        manipulation: {
+          enabled: false,
+          addNode: false,
+          addEdge: (data, callback) => {
+            const from = String(data.from || "");
+            const to = String(data.to || "");
+            if (!from || !to) return callback(null);
+            if (from === to) {
+              callback(null);
+              answer.adding = false;
+              answer.selected = { kind: "node", name: from };
+              this.activateContext(context);
+              this.save();
+              setTimeout(() => {
+                if (!host.isConnected) return;
+                network.selectNodes([from], false);
+                this.refreshFlowSelection(context);
+              }, 0);
+              return;
+            }
+            const key = flowPairKey(from, to);
+            if (flowConnectionByKey(answer, key)) {
+              callback(null);
+              this.toast("Those nodes are already connected.");
+              return;
+            }
+            const connection = { from, to };
+            answer.connections.push(connection);
+            answer.adding = false;
+            answer.selected = { kind: "connection", key };
+            callback(flowVisConnectionRecord(connection));
+            this.activateContext(context);
+            this.markChanged(answer);
+            setTimeout(() => {
+              if (!host.isConnected) return;
+              network.selectEdges([key]);
+              this.refreshFlowSelection(context);
+            }, 0);
+          },
+          editEdge: false,
+          deleteNode: false,
+          deleteEdge: false,
+          controlNodeStyle: {
+            shape: "dot",
+            size: 7,
+            color: { background: "#8dd7bd", border: "#14231e" },
+            borderWidth: 2
+          }
+        }
+      });
+      let connecting = false;
+      const pointerEventName = global.PointerEvent ? "pointerdown" : "mousedown";
+      const pointerUpEventName = global.PointerEvent ? "pointerup" : "mouseup";
+      const startConnection = (event) => {
+        if (!event.metaKey || event.button !== 0) return;
+        const bounds = host.getBoundingClientRect();
+        const nodeId = network.getNodeAt({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+        if (!nodeId) return;
+        connecting = true;
+        network.addEdgeMode();
+      };
+      const finishConnection = () => {
+        if (!connecting) return;
+        setTimeout(() => {
+          network.disableEditMode();
+          connecting = false;
+        }, 0);
+      };
+      host.addEventListener(pointerEventName, startConnection, true);
+      global.addEventListener(pointerUpEventName, finishConnection, true);
+      const editor = {
+        questionId: context.questionDef.id,
+        network,
+        nodes,
+        edges,
+        host,
+        cleanup: () => {
+          host.removeEventListener(pointerEventName, startConnection, true);
+          global.removeEventListener(pointerUpEventName, finishConnection, true);
+        }
+      };
+      this.flowEditors.push(editor);
+      network.on("click", (params) => {
+        answer.adding = false;
+        if (params.nodes.length) answer.selected = { kind: "node", name: String(params.nodes[0]) };
+        else if (params.edges.length) answer.selected = { kind: "connection", key: String(params.edges[0]) };
+        else answer.selected = null;
+        this.activateContext(context);
+        this.save();
+        this.refreshFlowSelection(context);
+      });
+      network.on("dragEnd", (params) => {
+        if (connecting || !params.nodes.length) return;
+        answer.positions = Object.assign({}, safeObject(answer.positions), network.getPositions(params.nodes.map(String)));
+        this.save();
+      });
+      network.once("afterDrawing", () => {
+        network.fit({ animation: { duration: 320, easingFunction: "easeInOutQuad" } });
+        const selected = normalizeFlowSelection(answer.selected, answer);
+        if (selected && selected.kind === "node") network.selectNodes([selected.name], false);
+        if (selected && selected.kind === "connection") network.selectEdges([selected.key]);
+      });
+    }
+
+    flowEditorFor(questionId) {
+      return this.flowEditors.find((editor) => editor.questionId === questionId) || null;
+    }
+
+    rememberFlowPositions(editor) {
+      if (!editor) return;
+      const context = this.contextByQuestionId(editor.questionId);
+      if (!context || context.questionDef.type !== "flow") return;
+      try {
+        const positions = Object.assign({}, safeObject(context.answer.positions), editor.network.getPositions());
+        context.answer.positions = normalizeFlowPositions(positions, context.answer.nodes);
+      } catch (_) {}
+    }
+
+    refreshFlowSelection(context) {
+      const section = this.sectionForContext(context);
+      if (!section || !context || context.questionDef.type !== "flow") return;
+      const selection = section.querySelector("[data-flow-selection]");
+      if (selection) selection.innerHTML = renderFlowSelection(context.answer);
+      this.refreshFlowToolbar(context);
+    }
+
+    refreshFlowToolbar(context) {
+      const section = this.sectionForContext(context);
+      if (!section || !context || context.questionDef.type !== "flow") return;
+      const remove = section.querySelector("[data-action='flow-delete']");
+      if (remove) {
+        const selected = normalizeFlowSelection(context.answer.selected, context.answer);
+        remove.disabled = !selected;
+        remove.innerHTML = `Delete <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌫</span></kbd>`;
+      }
+      const revert = section.querySelector("[data-action='flow-revert']");
+      if (revert) revert.disabled = !isFlowStructurallyChanged(context.questionDef, context.answer);
+    }
+
+    showFlowAdd(context) {
+      const section = this.sectionForContext(context);
+      if (!section || !context) return;
+      context.answer.adding = true;
+      context.answer.selected = null;
+      const editor = this.flowEditorFor(context.questionDef.id);
+      if (editor) editor.network.unselectAll();
+      this.refreshFlowSelection(context);
+      const input = section.querySelector("[data-input='flow-new-node']");
+      if (input) input.focus();
+    }
+
+    hideFlowAdd(context) {
+      const section = this.sectionForContext(context);
+      if (!section || !context) return;
+      context.answer.adding = false;
+      this.refreshFlowSelection(context);
+    }
+
+    addFlowNode(context) {
+      const section = this.sectionForContext(context);
+      const input = section && section.querySelector("[data-input='flow-new-node']");
+      const name = input && input.value.trim();
+      if (!name) return this.toast("Write the node name first.");
+      if (flowNodeByName(context.answer, name)) return this.toast("That node name is already used.");
+      this.rememberFlowPositions(this.flowEditorFor(context.questionDef.id));
+      const positions = Object.values(safeObject(context.answer.positions));
+      const newPosition = positions.length
+        ? {
+            x: Math.max(...positions.map((position) => position.x)) + 190,
+            y: positions.reduce((sum, position) => sum + position.y / positions.length, 0)
+          }
+        : { x: 0, y: 0 };
+      context.answer.nodes.push({ name });
+      context.answer.positions[name] = newPosition;
+      context.answer.selected = { kind: "node", name };
+      context.answer.adding = false;
+      this.activateContext(context);
+      this.saveChanged(context.answer);
+      this.render();
+    }
+
+    deleteFlowSelection(context) {
+      const answer = context && context.answer;
+      const selected = answer && normalizeFlowSelection(answer.selected, answer);
+      if (!selected) return;
+      this.rememberFlowPositions(this.flowEditorFor(context.questionDef.id));
+      if (selected.kind === "node") {
+        const attached = answer.connections.filter((connection) => connection.from === selected.name || connection.to === selected.name);
+        if (attached.length && !global.confirm(`Delete ${selected.name} and ${attached.length} connected ${attached.length === 1 ? "connection" : "connections"}?`)) return;
+        answer.nodes = answer.nodes.filter((node) => node.name !== selected.name);
+        answer.connections = answer.connections.filter((connection) => connection.from !== selected.name && connection.to !== selected.name);
+        delete answer.positions[selected.name];
+      } else {
+        answer.connections = answer.connections.filter((connection) => flowPairKey(connection.from, connection.to) !== selected.key);
+      }
+      answer.selected = null;
+      this.activateContext(context);
+      this.saveChanged(answer);
+      this.render();
+    }
+
+    revertFlow(context) {
+      const answer = context && context.answer;
+      if (!answer || !isFlowStructurallyChanged(context.questionDef, answer)) return;
+      if (!global.confirm("Revert structural changes to the original flow?")) return;
+      const editor = this.flowEditorFor(context.questionDef.id);
+      if (editor) editor.skipRemember = true;
+      const initial = initialFlowAnswer(context.questionDef);
+      initial.comment = answer.comment || "";
+      initial.nodes.forEach((node) => {
+        const current = flowNodeByName(answer, node.name);
+        if (current && current.comment) node.comment = current.comment;
+      });
+      initial.connections.forEach((connection) => {
+        const current = flowConnectionByKey(answer, flowPairKey(connection.from, connection.to));
+        if (current && current.comment) connection.comment = current.comment;
+      });
+      answer.nodes = initial.nodes;
+      answer.connections = initial.connections;
+      answer.positions = {};
+      answer.selected = null;
+      answer.adding = false;
+      answer.touched = isFlowChanged(context.questionDef, answer);
+      this.activateContext(context);
+      this.save();
+      this.render();
+    }
+
+    arrangeFlow(context) {
+      if (!context) return;
+      const editor = this.flowEditorFor(context.questionDef.id);
+      if (editor) editor.skipRemember = true;
+      context.answer.positions = {};
+      this.save();
+      this.render();
+    }
+
+    updateFlowSelectedValue(input, context) {
+      const answer = context && context.answer;
+      const selected = answer && normalizeFlowSelection(answer.selected, answer);
+      if (!selected) return;
+      const value = input.value.trim();
+      if (selected.kind === "connection") {
+        const connection = flowConnectionByKey(answer, selected.key);
+        if (!connection) return;
+        if (value) connection.label = value;
+        else delete connection.label;
+        const editor = this.flowEditorFor(context.questionDef.id);
+        if (editor) editor.edges.update({ id: selected.key, label: value });
+        this.markChanged(answer, true);
+        this.refreshFlowToolbar(context);
+        return;
+      }
+      const node = flowNodeByName(answer, selected.name);
+      if (!node) return;
+      if (!value) {
+        input.value = node.name;
+        return this.toast("A node needs a name.");
+      }
+      if (value !== node.name && flowNodeByName(answer, value)) {
+        input.value = node.name;
+        return this.toast("That node name is already used.");
+      }
+      if (value === node.name) return;
+      this.rememberFlowPositions(this.flowEditorFor(context.questionDef.id));
+      const previous = node.name;
+      node.name = value;
+      if (answer.positions[previous]) {
+        answer.positions[value] = answer.positions[previous];
+        delete answer.positions[previous];
+      }
+      answer.connections.forEach((connection) => {
+        if (connection.from === previous) connection.from = value;
+        if (connection.to === previous) connection.to = value;
+      });
+      answer.selected = { kind: "node", name: value };
+      this.activateContext(context);
+      this.saveChanged(answer);
+      this.render();
     }
 
     initCodeEditors() {
@@ -2204,6 +2827,23 @@
     return sortablePromise;
   }
 
+  function ensureVisNetwork() {
+    if (global.vis && global.vis.Network && global.vis.DataSet) return Promise.resolve(global.vis);
+    if (visNetworkPromise) return visNetworkPromise;
+    visNetworkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = VIS_NETWORK_URL;
+      script.async = true;
+      script.onload = () => {
+        if (global.vis && global.vis.Network && global.vis.DataSet) resolve(global.vis);
+        else reject(new Error("vis-network did not attach to window."));
+      };
+      script.onerror = () => reject(new Error("vis-network failed to load."));
+      document.head.appendChild(script);
+    });
+    return visNetworkPromise;
+  }
+
   async function loadCodeMirror(lang) {
     if (!codeMirrorPromise) codeMirrorPromise = import(CODEMIRROR_URL);
     if (!codeMirrorThemePromise) codeMirrorThemePromise = import(CODEMIRROR_THEME_URL);
@@ -2347,6 +2987,7 @@
     choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
     evaluation: (_questionDef, answer) => Boolean(answer.selected),
     bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id])),
+    flow: () => true,
     edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
   };
 
@@ -2410,6 +3051,171 @@
     let index = 2;
     while (used.has(`${base}-${index}`)) index += 1;
     return `${base}-${index}`;
+  }
+
+  function flowPairKey(from, to) {
+    return JSON.stringify([String(from || ""), String(to || "")].sort());
+  }
+
+  function flowNodeByName(answer, name) {
+    return asArray(answer && answer.nodes).find((node) => node && node.name === name) || null;
+  }
+
+  function flowConnectionByKey(answer, key) {
+    return asArray(answer && answer.connections).find((connection) => flowPairKey(connection.from, connection.to) === key) || null;
+  }
+
+  function normalizeFlowSelection(input, answer) {
+    const selected = safeObject(input);
+    if (selected.kind === "node" && flowNodeByName(answer, selected.name)) {
+      return { kind: "node", name: selected.name };
+    }
+    if (selected.kind === "connection" && flowConnectionByKey(answer, selected.key)) {
+      return { kind: "connection", key: selected.key };
+    }
+    return null;
+  }
+
+  function flowSemanticSnapshot(answer) {
+    const nodes = normalizeFlowNodes(answer && answer.nodes, answer && answer.connections)
+      .map((node) => ({ name: node.name, comment: node.comment || "" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const connections = normalizeFlowConnections(answer && answer.connections, false)
+      .map((connection) => ({
+        from: connection.from,
+        to: connection.to,
+        label: connection.label || "",
+        comment: connection.comment || ""
+      }))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return { nodes, connections, comment: String(answer && answer.comment || "") };
+  }
+
+  function flowStructureSnapshot(answer) {
+    const nodes = normalizeFlowNodes(answer && answer.nodes, answer && answer.connections)
+      .map((node) => node.name)
+      .sort((a, b) => a.localeCompare(b));
+    const connections = normalizeFlowConnections(answer && answer.connections, false)
+      .map((connection) => ({
+        from: connection.from,
+        to: connection.to,
+        label: connection.label || ""
+      }))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return { nodes, connections };
+  }
+
+  function isFlowChanged(questionDef, answer) {
+    return JSON.stringify(flowSemanticSnapshot(answer)) !== JSON.stringify(flowSemanticSnapshot(initialFlowAnswer(questionDef)));
+  }
+
+  function isFlowStructurallyChanged(questionDef, answer) {
+    return JSON.stringify(flowStructureSnapshot(answer)) !== JSON.stringify(flowStructureSnapshot(initialFlowAnswer(questionDef)));
+  }
+
+  function normalizeFlowPositions(input, nodes) {
+    const source = safeObject(input);
+    const positions = {};
+    asArray(nodes).forEach((node) => {
+      const position = safeObject(source[node.name]);
+      const x = Number(position.x);
+      const y = Number(position.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) positions[node.name] = { x, y };
+    });
+    return positions;
+  }
+
+  function defaultFlowPositions(nodes, connections) {
+    const names = asArray(nodes).map((node) => node.name);
+    const known = new Set(names);
+    const incoming = Object.fromEntries(names.map((name) => [name, 0]));
+    const outgoing = Object.fromEntries(names.map((name) => [name, []]));
+    asArray(connections).forEach((connection) => {
+      if (!known.has(connection.from) || !known.has(connection.to)) return;
+      incoming[connection.to] += 1;
+      outgoing[connection.from].push(connection.to);
+    });
+    const levels = Object.fromEntries(names.map((name) => [name, 0]));
+    const queue = names.filter((name) => incoming[name] === 0);
+    const visited = new Set();
+    while (queue.length) {
+      const name = queue.shift();
+      if (visited.has(name)) continue;
+      visited.add(name);
+      outgoing[name].forEach((target) => {
+        levels[target] = Math.max(levels[target], levels[name] + 1);
+        incoming[target] -= 1;
+        if (incoming[target] === 0) queue.push(target);
+      });
+    }
+    const lastLevel = Math.max(0, ...Object.values(levels));
+    names.filter((name) => !visited.has(name)).forEach((name) => { levels[name] = lastLevel + 1; });
+    const groups = {};
+    names.forEach((name) => {
+      const level = levels[name];
+      if (!groups[level]) groups[level] = [];
+      groups[level].push(name);
+    });
+    const positions = {};
+    Object.entries(groups).forEach(([level, entries]) => {
+      entries.forEach((name, index) => {
+        positions[name] = {
+          x: (index - (entries.length - 1) / 2) * 190,
+          y: Number(level) * 110
+        };
+      });
+    });
+    return positions;
+  }
+
+  function flowExportText(value) {
+    return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\s*\n\s*/g, " ");
+  }
+
+  function flowVisNodeRecord(node, position) {
+    const comment = String(node.comment || "");
+    const highlighted = Boolean(comment.trim());
+    const record = {
+      id: node.name,
+      label: node.name,
+      comment,
+      shape: "box",
+      color: {
+        background: "#3d4744",
+        border: highlighted ? "#f2c14e" : "#71817b",
+        highlight: { background: "#46524f", border: "#8dd7bd" },
+        hover: { background: "#46524f", border: "#8dd7bd" }
+      },
+      borderWidth: highlighted ? 3 : 1.5,
+      shadow: highlighted ? { enabled: true, color: "rgba(242,193,78,.3)", size: 16, x: 0, y: 0 } : false
+    };
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+      record.x = position.x;
+      record.y = position.y;
+    }
+    return record;
+  }
+
+  function flowVisConnectionRecord(connection) {
+    const comment = String(connection.comment || "");
+    const highlighted = Boolean(comment.trim());
+    return {
+      id: flowPairKey(connection.from, connection.to),
+      from: connection.from,
+      to: connection.to,
+      label: connection.label || "",
+      comment,
+      arrows: { to: { enabled: true, scaleFactor: 0.82 } },
+      color: {
+        color: highlighted ? "#f2c14e" : "#71817b",
+        highlight: "#8dd7bd",
+        hover: "#8dd7bd",
+        inherit: false
+      },
+      width: 1.7,
+      dashes: false,
+      smooth: { enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 }
+    };
   }
 
   function artifactText(artifact) {
@@ -2527,6 +3333,7 @@
     choice,
     evaluation,
     bucket,
+    flow,
     edit,
     option,
     feature,
