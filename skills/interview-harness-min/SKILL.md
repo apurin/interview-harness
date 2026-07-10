@@ -42,12 +42,9 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 
 ## Question Helpers
 
-- `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text; `multiline` defaults to `true`.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`. Many-choice lets users add custom options.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Users can comment on columns and rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
-- `h.rank({ id, prompt, options })`: drag options into priority order.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into named buckets.
-- `h.classify({ id, prompt, states, options })`: choose one state per option, edit option text, and add options.
 - `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact; use `h.code({ lang, value })` for the artifact.
 
 `cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans.
@@ -69,11 +66,11 @@ Identify the decision areas before writing questions. A decision area is a disti
 
 Single-theme comparisons often need one question. Multi-theme briefs may need several questions when each covers a different area.
 
-Do not ask the same decision through multiple helpers. For example, avoid pairing an option comparison with a separate priority rank, shortlist edit, and final choice when the comparison already captures those signals.
+Do not ask the same decision through multiple helpers. For example, avoid pairing an option comparison with a separate shortlist edit and final choice when the comparison already captures those signals.
 
 For option comparisons, prefer one `h.evaluation` with clear rows, option bodies, tags, and comments. The evaluation can be the whole artifact for that decision area.
 
-Use `rank` only when ordered output is needed. Use `bucket` only when categorized output is needed. Use `classify` only when option states, terms, assumptions, or claims need validation. Use `edit` only when the edited text or code is the deliverable.
+Use `bucket` only when categorized output is needed. Use `edit` only when the edited text or code is the deliverable.
 
 Keep background material out of the interview by default. Include only context that is essential for the user to answer the questions. Put sources, reading material, extended reasoning, and static notes in the final response or another artifact. Do not create a question only to display them or a visualization.
 

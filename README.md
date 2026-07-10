@@ -2,7 +2,7 @@
 
 Interview Harness is a readable client-side JavaScript library for one-off local interview pages. Agents use it to ask interactive questions, show rich options, let a user react or edit, and export only the user-entered or changed answers.
 
-The output is a temporary HTML artifact. The library carries layout, state, navigation, comments, drag ordering, code editing, and export behavior so generated interview files stay small.
+The output is a temporary HTML artifact. The library carries layout, state, navigation, comments, drag-and-drop bucketing, code editing, and export behavior so generated interview files stay small.
 
 ## Files
 
@@ -25,10 +25,6 @@ Create one HTML file that loads the major-pinned browser library from jsDelivr.
     title: "Project direction interview",
     intro: "Short context for the user.",
     questions: [
-      h.text({
-        id: "context",
-        prompt: "What should I keep in mind?"
-      }),
       h.choice({
         id: "direction",
         prompt: "Which direction should I continue?",
@@ -101,12 +97,9 @@ https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/skills/interview-harness/
 
 ## Question API
 
-- `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: single or multiple choice. `select` is `"one"` or `"many"`. `cardsPerRow` is `"auto"`, `1`, `2`, `3`, or `4`.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Use `h.feature({ id, title, body, group, cells })` for rows. Users can comment on columns and rows. Cell icons are `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, and `"best"`; add `text` or `detail` when an icon is not enough.
-- `h.rank({ id, prompt, options })`: drag reorder.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
-- `h.classify({ id, prompt, states, options })`: single-select states and editable option text.
 - `h.edit({ id, prompt, artifact, language })`: editable code or text artifact.
 
 Short interviews show all questions by default. Longer interviews show one question per page. Users can switch views in the page.
@@ -127,13 +120,10 @@ An option body may be an array, so one option can combine prose, tables, images,
 
 The page exposes text and JSON export. Exports include only changed answers and user-entered data:
 
-- text answers with content
 - selected choices
 - selected evaluation columns with their row values
 - added options
-- changed rank or bucket order
-- selected classify states
-- edited classify text
+- changed bucket assignments
 - edited content changed from the original artifact
 - comments the user wrote
 
@@ -143,7 +133,7 @@ Untouched defaults stay out of the export.
 
 The library is standalone source, but it loads a few browser-side packages when a question needs them:
 
-- SortableJS `1.15.7` for rank and bucket drag controls.
+- SortableJS `1.15.7` for bucket drag controls.
 - CodeMirror `6.0.2` for edit questions and code previews.
 - `@codemirror/lang-javascript` `6.2.5`, `@codemirror/lang-markdown` `6.5.0`, `@codemirror/lang-html` `6.4.11`, and `@codemirror/lang-json` `6.0.2` for syntax support.
 - `@codemirror/theme-one-dark` `6.1.3` for a consistent editor theme.

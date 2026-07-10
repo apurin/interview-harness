@@ -42,12 +42,9 @@ Put rich helpers in option `body` values or `h.edit` artifacts.
 
 ## Question Helpers
 
-- `h.text({ id, prompt, placeholder, multiline, defaultValue })`: freeform text; `multiline` defaults to `true`.
 - `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`. Many-choice lets users add custom options.
 - `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Users can comment on columns and rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
-- `h.rank({ id, prompt, options })`: drag reorder.
 - `h.bucket({ id, prompt, buckets, options })`: drag options into buckets.
-- `h.classify({ id, prompt, states, options })`: single-select states and editable option text.
 - `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact; use `h.code({ lang, value })` for the artifact.
 
 `cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans.
@@ -99,11 +96,8 @@ Before finalizing, verify that all statements apply:
 
 - Use `evaluation` for vendor, framework, platform, tier, package, implementation, or design-option comparisons where rows are shared criteria and columns are selectable answers. Include recommendation signals in option tags, option bodies, and row cells. Do not add separate priority, shortlist, or final-choice questions for the same decision area.
 - Use `choice` for a small set of distinct routes where the user mainly needs to pick one. Use rich option bodies for tradeoffs or previews.
-- Use `classify` for assumptions, terminology, claims, or scope items whose truth changes the work.
 - Use `bucket` only when the bucketed categories are the output: decide now/later, include/exclude, must/should/could, or similar planning groups.
-- Use `rank` only when the ordered result is the output: workflow steps, roadmap order, agenda order, or independent priorities not already encoded as evaluation rows.
 - Use `edit` only when the edited text or code is the deliverable. Do not ask the user to edit a recommendation, shortlist, source list, or decision note unless that edited artifact is the requested output.
-- Use `text` for missing context that cannot be represented by selecting, commenting, classifying, ranking, or editing the actual deliverable.
 - Keep sources, reading material, and static references outside the interview unless they are essential to a specific question. Do not make them a question.
 
 ## Output Behavior
