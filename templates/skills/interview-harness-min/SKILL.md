@@ -77,5 +77,5 @@ Keep background material out of the interview by default. Include only context t
 ## Output Behavior
 
 - Users can comment on any option, including options they do not select.
-- Answers and comments export as text or JSON.
+- Answers and comments export as text.
 - Exports include only user-entered or changed answers.

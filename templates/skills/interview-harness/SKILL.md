@@ -103,5 +103,5 @@ Before finalizing, verify that all statements apply:
 ## Output Behavior
 
 - Users can comment on any option, including options they do not select.
-- Answers and comments export as text or JSON.
+- Answers and comments export as text.
 - Exports include only user-entered or changed answers.

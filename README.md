@@ -118,7 +118,7 @@ An option body may be an array, so one option can combine prose, tables, images,
 
 ## Output
 
-The page exposes text and JSON export. Exports include only changed answers and user-entered data:
+The page exports a text answer summary containing only changed answers and user-entered data:
 
 - selected choices
 - selected evaluation columns with their row values

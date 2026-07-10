@@ -74,7 +74,6 @@
     config.questions = asArray(config.questions).map(normalizeQuestion);
     config.storageKey = config.storageKey === false ? false : String(config.storageKey || defaultStorageKey(config.title));
     config.copyTextLabel = config.copyTextLabel || "Copy text";
-    config.copyJsonLabel = config.copyJsonLabel || "Copy JSON";
     return config;
   }
 
@@ -255,96 +254,6 @@
     return answer;
   }
 
-  function buildResult(config, state) {
-    const answers = config.questions
-      .map((questionDef, index) => serializeAnswer(questionDef, state.answers[questionDef.id], index))
-      .filter(Boolean);
-    return {
-      title: config.title,
-      generatedAt: new Date().toISOString(),
-      answers
-    };
-  }
-
-  const answerSerializers = {
-    choice: serializeChoiceAnswer,
-    evaluation: serializeEvaluationAnswer,
-    bucket: serializeBucketAnswer,
-    edit: serializeEditAnswer
-  };
-
-  function serializeAnswer(questionDef, answer, index) {
-    if (!answer || !isAnswerChanged(questionDef, answer)) return null;
-    const base = {
-      id: questionDef.id,
-      type: questionDef.type,
-      question: questionDef.prompt,
-      position: index + 1
-    };
-    return Object.assign(base, answerSerializers[questionDef.type](questionDef, answer));
-  }
-
-  function serializeChoiceAnswer(questionDef, answer) {
-    const comments = optionComments(answerOptions(questionDef, answer), answer.comments);
-    const payload = { select: questionDef.select };
-    if (questionDef.select === "many") {
-      const selectedIds = asArray(answer.selected);
-      const selected = selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean);
-      const added = asArray(answer.added)
-        .filter((entry) => entry.title || selectedIds.includes(entry.id) || optionComment(answer, entry.id))
-        .map((entry) => {
-          const optionPayload = { id: entry.id, title: entry.title, selected: selectedIds.includes(entry.id) };
-          const comment = optionComment(answer, entry.id);
-          if (comment) optionPayload.comment = comment;
-          return optionPayload;
-        });
-      if (selected.length) payload.selected = selected;
-      if (added.length) payload.added = added;
-    } else if (answer.selected) {
-      payload.selected = findOption(questionDef, answer, answer.selected);
-    }
-    if (comments.length) payload.comments = comments;
-    return payload;
-  }
-
-  function serializeEvaluationAnswer(questionDef, answer) {
-    const selected = answer.selected ? evaluationOptionPayload(questionDef, answer.selected) : null;
-    const payload = {};
-    const optionCommentsList = optionComments(questionDef.options, answer.optionComments);
-    const rowCommentsList = evaluationRowComments(questionDef.rows, answer.rowComments);
-    if (selected) payload.selected = selected;
-    if (optionCommentsList.length) payload.optionComments = optionCommentsList;
-    if (rowCommentsList.length) payload.rowComments = rowCommentsList;
-    return payload;
-  }
-
-  function serializeBucketAnswer(questionDef, answer) {
-    const buckets = {};
-    questionDef.buckets.forEach((bucket) => { buckets[bucket.title] = []; });
-    const unset = [];
-    questionDef.options.forEach((entry) => {
-      const bucket = questionDef.buckets.find((candidate) => candidate.id === answer.buckets[entry.id]);
-      const comment = optionComment(answer, entry.id);
-      const payload = { id: entry.id, title: entry.title };
-      if (comment) payload.comment = comment;
-      if (bucket) buckets[bucket.title].push(payload);
-      else if (comment) unset.push(payload);
-    });
-    Object.keys(buckets).forEach((bucket) => {
-      if (!buckets[bucket].length) delete buckets[bucket];
-    });
-    const payload = {};
-    if (Object.keys(buckets).length) payload.buckets = buckets;
-    if (unset.length) payload.unset = unset;
-    return payload;
-  }
-
-  function serializeEditAnswer(questionDef, answer) {
-    const output = { summary: answer.summary || "" };
-    if (String(answer.content || "") !== artifactText(questionDef.artifact)) output.content = answer.content || "";
-    return output;
-  }
-
   const textExporters = {
     choice: appendChoiceAnswer,
     evaluation: appendEvaluationAnswer,
@@ -353,78 +262,82 @@
   };
 
   function buildTextExport(config, state) {
-    const result = buildResult(config, state);
-    const lines = [`# ${result.title}`, ""];
-    if (!result.answers.length) {
-      lines.push("No user changes yet.");
-      return lines.join("\n").trim() + "\n";
-    }
-
-    result.answers.forEach((entry) => {
-      lines.push(`## ${entry.position}. ${entry.question}`);
-      textExporters[entry.type](lines, entry);
+    const lines = [`# ${config.title}`, ""];
+    let changed = false;
+    config.questions.forEach((questionDef, index) => {
+      const answer = state.answers[questionDef.id];
+      if (!isAnswerChanged(questionDef, answer)) return;
+      changed = true;
+      lines.push(`## ${index + 1}. ${questionDef.prompt}`);
+      textExporters[questionDef.type](lines, questionDef, answer);
       lines.push("");
     });
+    if (!changed) lines.push("No user changes yet.");
 
     return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
 
-  function appendChoiceAnswer(lines, entry) {
-    if (entry.select === "many" && entry.selected && entry.selected.length) {
+  function appendChoiceAnswer(lines, questionDef, answer) {
+    const selectedIds = asArray(answer.selected);
+    if (questionDef.select === "many" && selectedIds.length) {
       lines.push("Selected:");
-      entry.selected.forEach((option) => lines.push(`- ${option.title}`));
+      selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean)
+        .forEach((option) => lines.push(`- ${option.title}`));
     }
-    if (entry.select === "one" && entry.selected) lines.push(`Selected: ${entry.selected.title}`);
-    if (entry.added && entry.added.length) {
+    if (questionDef.select === "one" && answer.selected) {
+      const selected = findOption(questionDef, answer, answer.selected);
+      if (selected) lines.push(`Selected: ${selected.title}`);
+    }
+    const added = asArray(answer.added).filter((entry) => entry.title || selectedIds.includes(entry.id) || optionComment(answer, entry.id));
+    if (added.length) {
       lines.push("Added custom options:");
-      entry.added.forEach((added) => {
-        const selected = added.selected ? "selected" : "not selected";
-        const comment = added.comment ? ` Comment: ${added.comment}` : "";
-        lines.push(`- ${added.title || added} (${selected})${comment}`);
+      added.forEach((entry) => {
+        const selected = selectedIds.includes(entry.id) ? "selected" : "not selected";
+        const comment = optionComment(answer, entry.id);
+        lines.push(`- ${entry.title} (${selected})${comment ? ` Comment: ${comment}` : ""}`);
       });
     }
-    appendComments(lines, entry.comments || []);
+    appendComments(lines, optionComments(answerOptions(questionDef, answer), answer.comments));
   }
 
-  function appendEvaluationAnswer(lines, entry) {
-    if (entry.selected) lines.push(`Selected: ${entry.selected.title}`);
-    appendComments(lines, entry.optionComments || [], "Column comments:");
-    appendComments(lines, entry.rowComments || [], "Feature row comments:");
+  function appendEvaluationAnswer(lines, questionDef, answer) {
+    const selected = questionDef.options.find((entry) => entry.id === answer.selected);
+    if (selected) lines.push(`Selected: ${selected.title}`);
+    appendComments(lines, optionComments(questionDef.options, answer.optionComments), "Column comments:");
+    appendComments(lines, evaluationRowComments(questionDef.rows, answer.rowComments), "Feature row comments:");
   }
 
-  function appendBucketAnswer(lines, entry) {
-    Object.keys(entry.buckets || {}).forEach((bucket) => {
-      lines.push(`${bucket}:`);
-      if (entry.buckets[bucket].length) {
-        entry.buckets[bucket].forEach((option) => {
-          const comment = option.comment ? ` Comment: ${option.comment}` : "";
-          lines.push(`- ${option.title}${comment}`);
-        });
-      } else {
-        lines.push("- none");
-      }
+  function appendBucketAnswer(lines, questionDef, answer) {
+    questionDef.buckets.forEach((bucket) => {
+      const options = questionDef.options.filter((entry) => answer.buckets[entry.id] === bucket.id);
+      if (!options.length) return;
+      lines.push(`${bucket.title}:`);
+      options.forEach((entry) => {
+        const comment = optionComment(answer, entry.id);
+        lines.push(`- ${entry.title}${comment ? ` Comment: ${comment}` : ""}`);
+      });
     });
-    if (entry.unset && entry.unset.length) {
+    const unset = questionDef.options.filter((entry) => !answer.buckets[entry.id] && optionComment(answer, entry.id));
+    if (unset.length) {
       lines.push("Unsorted:");
-      entry.unset.forEach((option) => lines.push(`- ${option.title}`));
+      unset.forEach((entry) => lines.push(`- ${entry.title}`));
     }
   }
 
-  function appendEditAnswer(lines, entry) {
-    if (entry.content !== undefined) {
+  function appendEditAnswer(lines, questionDef, answer) {
+    if (String(answer.content || "") !== artifactText(questionDef.artifact)) {
       lines.push("Edited artifact:");
       lines.push("```");
-      lines.push(entry.content || "");
+      lines.push(answer.content || "");
       lines.push("```");
     }
-    if (entry.summary) lines.push(`Overall comment: ${entry.summary}`);
+    if (answer.summary) lines.push(`Overall comment: ${answer.summary}`);
   }
 
   function appendComments(lines, comments, heading) {
-    const filled = comments.filter((entry) => entry.comment);
-    if (!filled.length) return;
+    if (!comments.length) return;
     lines.push(heading || "Comments:");
-    filled.forEach((entry) => lines.push(`- ${entry.title}: ${entry.comment}`));
+    comments.forEach((entry) => lines.push(`- ${entry.title}: ${entry.comment}`));
   }
 
   const answerChangeChecks = {
@@ -925,7 +838,6 @@
     .ih-code-viewer-fallback { margin: 0; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
     .ih-editor-loading { color: var(--ih-muted); font-size: 13px; padding: 12px 0 0; }
 
-    .ih-export { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
     .ih-output { min-height: 420px; max-height: 62vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--ih-code-bg); color: var(--ih-code-ink); border-radius: var(--ih-radius); padding: 16px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
     .ih-bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; border-top: 0; background: color-mix(in srgb, var(--ih-bg) 92%, transparent); box-shadow: 0 -1px 0 rgb(255 255 255 / 4%), 0 -12px 28px rgb(8 14 13 / 16%); backdrop-filter: blur(16px); }
@@ -970,7 +882,7 @@
     .ih-evaluation-tooltip-body { margin: 0; font-size: 12px; font-weight: 650; line-height: 1.42; white-space: pre-wrap; }
 
     @media (max-width: 900px) {
-      .ih-topbar-inner, .ih-export { grid-template-columns: 1fr; }
+      .ih-topbar-inner { grid-template-columns: 1fr; }
       .ih-actions { justify-content: start; }
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
@@ -1311,31 +1223,21 @@
 
   function renderExportStep(instance) {
     const text = instance.getText();
-    const json = instance.getJSON();
     return `
       <section class="ih-step" id="ih-output">
         <div class="ih-question-head">
           <div>
             <p class="ih-kicker">Output</p>
             <h2 class="ih-prompt">Export the answer summary.</h2>
-            <p class="ih-export-note">The text version is the default handoff. JSON is available when the next step benefits from structure.</p>
+            <p class="ih-export-note">Copy the answer summary for the next agent.</p>
           </div>
         </div>
-        <div class="ih-export">
-          <div class="ih-card">
-            <div class="ih-option-top" style="margin-bottom:12px">
-              <h3 class="ih-option-title">Text</h3>
-              <button class="ih-btn ih-btn-primary" type="button" data-action="copy-text">${escapeHTML(instance.config.copyTextLabel)}</button>
-            </div>
-            <pre class="ih-output" data-export-text>${escapeHTML(text)}</pre>
+        <div class="ih-card">
+          <div class="ih-option-top" style="margin-bottom:12px">
+            <h3 class="ih-option-title">Answer summary</h3>
+            <button class="ih-btn ih-btn-primary" type="button" data-action="copy-text">${escapeHTML(instance.config.copyTextLabel)}</button>
           </div>
-          <div class="ih-card">
-            <div class="ih-option-top" style="margin-bottom:12px">
-              <h3 class="ih-option-title">JSON</h3>
-              <button class="ih-btn" type="button" data-action="copy-json">${escapeHTML(instance.config.copyJsonLabel)}</button>
-            </div>
-            <pre class="ih-output" data-export-json>${escapeHTML(json)}</pre>
-          </div>
+          <pre class="ih-output" data-export-text>${escapeHTML(text)}</pre>
         </div>
       </section>
     `;
@@ -1603,7 +1505,6 @@
       if (action === "reset") return this.reset();
       if (action === "toggle-mode") return this.toggleMode();
       if (action === "copy-text") return this.copyText();
-      if (action === "copy-json") return this.copyJson();
       if (action === "jump") return this.jump(numberOr(actionEl.dataset.step, this.state.step));
       if (action === "open-comment") return this.openComment(actionEl);
       if (action === "close-comment") return this.closeComment();
@@ -1754,9 +1655,7 @@
 
     refreshExport() {
       const textOutput = this.root.querySelector("[data-export-text]");
-      const jsonOutput = this.root.querySelector("[data-export-json]");
       if (textOutput) textOutput.textContent = this.getText();
-      if (jsonOutput) jsonOutput.textContent = this.getJSON();
     }
 
     toggleMode() {
@@ -2267,26 +2166,13 @@
       } catch (_) {}
     }
 
-    getResult() {
-      return buildResult(this.config, this.state);
-    }
-
     getText() {
       return buildTextExport(this.config, this.state);
-    }
-
-    getJSON() {
-      return JSON.stringify(this.getResult(), null, 2);
     }
 
     async copyText() {
       await copyToClipboard(this.getText());
       this.toast("Copied text output.");
-    }
-
-    async copyJson() {
-      await copyToClipboard(this.getJSON());
-      this.toast("Copied JSON output.");
     }
 
     toast(message) {
@@ -2471,11 +2357,6 @@
 
   function isEvaluationIcon(value) {
     return ["yes", "no", "partial", "unknown", "warn", "best"].includes(String(value || ""));
-  }
-
-  function evaluationOptionPayload(questionDef, id) {
-    const entry = questionDef.options.find((candidate) => candidate.id === id);
-    return entry ? { id: entry.id, title: entry.title } : null;
   }
 
   function evaluationRowComments(rows, comments) {
