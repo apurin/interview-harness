@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Atlas product interview</title>
+  </head>
+  <body>
+    <div id="interview-harness"></div>
+    <script src="../interview-harness.js"></script>
+    <script>
+      const h = InterviewHarness;
+
+      const wireframeStyle = `
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 16px; background: #eef0f2; color: #20252b; font: 12px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+          .frame { overflow: hidden; height: 244px; border: 1px solid #cfd4da; border-radius: 10px; background: #fff; box-shadow: 0 10px 28px rgba(25, 32, 40, .08); }
+          .toolbar { display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 10px; border-bottom: 1px solid #dfe3e7; background: #f8f9fa; }
+          .brand { font-weight: 750; }
+          .actions { display: flex; gap: 5px; }
+          .dot { width: 7px; height: 7px; border-radius: 50%; background: #b9c0c8; }
+          .dot.accent { background: #55b894; }
+          .line { height: 7px; border-radius: 999px; background: #d9dde2; }
+          .line.dark { background: #919aa4; }
+          .line.accent { background: #77c9ab; }
+          .w25 { width: 25%; } .w35 { width: 35%; } .w45 { width: 45%; } .w60 { width: 60%; } .w75 { width: 75%; } .w90 { width: 90%; }
+          .three { display: grid; grid-template-columns: 62px 102px 1fr; height: 210px; }
+          .nav { padding: 10px 8px; border-right: 1px solid #e0e4e8; background: #f6f7f8; }
+          .nav .block { height: 28px; margin-bottom: 7px; border-radius: 6px; background: #e3e6ea; }
+          .nav .block.active { background: #d6f1e7; border: 1px solid #83cdb3; }
+          .list { padding: 10px 8px; border-right: 1px solid #e0e4e8; }
+          .list .card { margin-bottom: 7px; padding: 8px; border: 1px solid #dce1e5; border-radius: 7px; }
+          .list .card.active { border-color: #63bd9d; box-shadow: 0 0 0 1px #63bd9d inset; }
+          .card .line + .line { margin-top: 6px; }
+          .document { padding: 14px; }
+          .document h2 { margin: 0 0 10px; font-size: 15px; }
+          .document .line { margin-bottom: 7px; }
+          .quote { margin-top: 12px; padding: 10px; border-left: 3px solid #63bd9d; background: #f1f8f5; }
+          .canvas-layout { display: grid; grid-template-columns: 1fr 112px; height: 210px; }
+          .canvas { position: relative; overflow: hidden; background: linear-gradient(#f1f3f5 1px, transparent 1px), linear-gradient(90deg, #f1f3f5 1px, transparent 1px); background-size: 18px 18px; }
+          .node { position: absolute; width: 80px; padding: 9px; border: 1px solid #cdd3d9; border-radius: 8px; background: white; box-shadow: 0 5px 12px rgba(25, 32, 40, .08); }
+          .node.a { left: 25px; top: 38px; } .node.b { left: 132px; top: 86px; border-color: #63bd9d; } .node.c { left: 240px; top: 35px; }
+          .connector { position: absolute; height: 2px; transform-origin: left center; background: #aeb6bf; }
+          .connector.ab { left: 98px; top: 75px; width: 72px; transform: rotate(25deg); }
+          .connector.bc { left: 205px; top: 105px; width: 80px; transform: rotate(-30deg); }
+          .inspector { padding: 11px; border-left: 1px solid #dfe3e7; background: #fafbfb; }
+          .inspector strong { display: block; margin-bottom: 12px; }
+          .field { height: 24px; margin-bottom: 8px; border: 1px solid #d8dde2; border-radius: 5px; background: white; }
+          .focus-layout { display: grid; grid-template-columns: 54px 1fr; height: 210px; }
+          .rail { padding: 10px 8px; border-right: 1px solid #e0e4e8; background: #f6f7f8; }
+          .rail .icon { width: 28px; height: 28px; margin: 0 auto 9px; border-radius: 7px; background: #dfe3e7; }
+          .rail .icon.active { background: #ccecdf; }
+          .focus-doc { position: relative; padding: 14px 24px; }
+          .focus-doc h2 { margin: 0 0 12px; font-size: 16px; }
+          .focus-doc .line { margin-bottom: 8px; }
+          .command { position: absolute; right: 24px; bottom: 15px; left: 24px; display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #cfd5db; border-radius: 8px; background: #fbfcfc; box-shadow: 0 8px 18px rgba(25, 32, 40, .08); }
+          .key { padding: 2px 5px; border-radius: 4px; background: #e5e8eb; color: #68717b; font-size: 10px; }
+        </style>`;
+
+      const miniWireframe = (label, drawing) => h.html({
+        markup: `<svg viewBox="0 0 108 54" width="108" height="54" role="img" aria-label="${label} wireframe" style="display:block;max-width:100%;margin-top:8px;color:#88938f"><rect x="1" y="1" width="106" height="52" rx="7" fill="rgba(255,255,255,.025)" stroke="currentColor" stroke-width="1.2"/>${drawing}</svg>`
+      });
+
+      const miniWireframes = {
+        offline: miniWireframe("Offline collections", `<rect x="8" y="8" width="20" height="38" rx="3" fill="rgba(103,198,164,.13)" stroke="#67c6a4"/><line x1="35" y1="13" x2="96" y2="13" stroke="currentColor"/><line x1="35" y1="24" x2="88" y2="24" stroke="currentColor"/><line x1="35" y1="35" x2="92" y2="35" stroke="currentColor"/><line x1="35" y1="43" x2="72" y2="43" stroke="currentColor"/>`),
+        command: miniWireframe("Command palette", `<rect x="16" y="16" width="76" height="23" rx="5" stroke="#67c6a4"/><circle cx="27" cy="27.5" r="3" stroke="currentColor"/><line x1="35" y1="27.5" x2="74" y2="27.5" stroke="currentColor"/><rect x="78" y="23" width="8" height="8" rx="2" stroke="currentColor"/>`),
+        views: miniWireframe("Saved views", `<rect x="8" y="9" width="28" height="15" rx="3" stroke="currentColor"/><rect x="40" y="9" width="28" height="15" rx="3" stroke="#67c6a4"/><rect x="72" y="9" width="28" height="15" rx="3" stroke="currentColor"/><rect x="8" y="29" width="44" height="16" rx="3" stroke="currentColor"/><rect x="56" y="29" width="44" height="16" rx="3" stroke="currentColor"/>`),
+        comments: miniWireframe("Inline comments", `<rect x="10" y="8" width="54" height="38" rx="4" stroke="currentColor"/><line x1="18" y1="17" x2="54" y2="17" stroke="currentColor"/><line x1="18" y1="25" x2="48" y2="25" stroke="currentColor"/><path d="M72 17h26v18H84l-7 6v-6h-5z" stroke="#67c6a4"/>`),
+        team: miniWireframe("Team permissions", `<circle cx="23" cy="18" r="6" stroke="#67c6a4"/><circle cx="39" cy="18" r="6" stroke="currentColor"/><path d="M12 36c2-8 20-8 22 0M28 36c2-8 20-8 22 0" stroke="currentColor"/><line x1="59" y1="14" x2="96" y2="14" stroke="currentColor"/><line x1="59" y1="26" x2="88" y2="26" stroke="currentColor"/><line x1="59" y1="38" x2="93" y2="38" stroke="currentColor"/>`),
+        api: miniWireframe("Public API", `<rect x="9" y="11" width="27" height="12" rx="3" stroke="currentColor"/><rect x="72" y="31" width="27" height="12" rx="3" stroke="currentColor"/><circle cx="54" cy="27" r="7" stroke="#67c6a4"/><path d="M36 17l12 7M60 30l12 6" stroke="currentColor"/><path d="M18 32l-5 5 5 5M31 32l5 5-5 5" stroke="currentColor"/>`),
+        plugins: miniWireframe("Plugin marketplace", `<rect x="10" y="9" width="22" height="16" rx="3" stroke="currentColor"/><rect x="38" y="9" width="22" height="16" rx="3" stroke="#67c6a4"/><rect x="66" y="9" width="22" height="16" rx="3" stroke="currentColor"/><rect x="10" y="30" width="22" height="15" rx="3" stroke="currentColor"/><rect x="38" y="30" width="22" height="15" rx="3" stroke="currentColor"/><path d="M77 33v10M72 38h10" stroke="currentColor"/>`),
+        mobile: miniWireframe("Mobile companion", `<rect x="39" y="6" width="30" height="42" rx="6" stroke="#67c6a4"/><line x1="46" y1="14" x2="62" y2="14" stroke="currentColor"/><rect x="46" y="20" width="16" height="8" rx="2" stroke="currentColor"/><line x1="46" y1="34" x2="62" y2="34" stroke="currentColor"/><line x1="46" y1="39" x2="58" y2="39" stroke="currentColor"/>`)
+      };
+
+      h.mount({
+        title: "Shape the Atlas desktop beta",
+        intro: "Review the workspace layout, desktop stack, release sequence, and customer journey before implementation continues.",
+        storageKey: false,
+        questions: [
+          h.choice({
+            id: "workspace-layout",
+            prompt: "Which layout should organize the research workspace?",
+            select: "one",
+            cardsPerRow: 3,
+            options: [
+              h.option({
+                id: "three-pane",
+                title: "Three-pane workspace",
+                tags: ["Recommended", "Fast scanning"],
+                body: h.frame({
+                  title: "Library, sources, and document",
+                  height: 300,
+                  srcdoc: `${wireframeStyle}<div class="frame"><div class="toolbar"><span class="brand">Atlas</span><span class="actions"><i class="dot"></i><i class="dot accent"></i><i class="dot"></i></span></div><div class="three"><aside class="nav"><div class="block active"></div><div class="block"></div><div class="block"></div><div class="block"></div></aside><section class="list"><div class="card active"><div class="line dark w75"></div><div class="line w90"></div></div><div class="card"><div class="line dark w60"></div><div class="line w75"></div></div><div class="card"><div class="line dark w90"></div><div class="line w45"></div></div></section><main class="document"><h2>Interview synthesis</h2><div class="line dark w45"></div><div class="line w90"></div><div class="line w75"></div><div class="line w90"></div><div class="quote"><div class="line accent w60"></div><div class="line w90"></div></div></main></div></div>`
+                })
+              }),
+              h.option({
+                id: "canvas-inspector",
+                title: "Canvas + inspector",
+                tags: ["Spatial", "Flexible"],
+                body: h.frame({
+                  title: "Visual canvas with contextual controls",
+                  height: 300,
+                  srcdoc: `${wireframeStyle}<div class="frame"><div class="toolbar"><span class="brand">Atlas</span><span class="actions"><i class="dot"></i><i class="dot accent"></i><i class="dot"></i></span></div><div class="canvas-layout"><main class="canvas"><i class="connector ab"></i><i class="connector bc"></i><div class="node a"><div class="line dark w75"></div><div class="line w90"></div></div><div class="node b"><div class="line accent w60"></div><div class="line w90"></div></div><div class="node c"><div class="line dark w45"></div><div class="line w75"></div></div></main><aside class="inspector"><strong>Inspector</strong><div class="field"></div><div class="field"></div><div class="line w75"></div><div class="line w45"></div></aside></div></div>`
+                })
+              }),
+              h.option({
+                id: "focused-document",
+                title: "Focused document",
+                tags: ["Low distraction"],
+                body: h.frame({
+                  title: "Document-first workspace",
+                  height: 300,
+                  srcdoc: `${wireframeStyle}<div class="frame"><div class="toolbar"><span class="brand">Atlas</span><span class="actions"><i class="dot"></i><i class="dot accent"></i><i class="dot"></i></span></div><div class="focus-layout"><aside class="rail"><div class="icon active"></div><div class="icon"></div><div class="icon"></div><div class="icon"></div></aside><main class="focus-doc"><h2>Market landscape</h2><div class="line dark w35"></div><div class="line w90"></div><div class="line w75"></div><div class="line w90"></div><div class="line w60"></div><div class="command"><span>Ask Atlas or add a source…</span><span class="key">⌘ K</span></div></main></div></div>`
+                })
+              })
+            ]
+          }),
+          h.evaluation({
+            id: "desktop-stack",
+            prompt: "Which desktop stack should power the offline research workspace?",
+            options: [
+              h.option({ id: "electron", title: "Electron", tags: ["Fastest delivery"], body: "Chromium + Node with the broadest desktop plugin ecosystem." }),
+              h.option({ id: "tauri", title: "Tauri", tags: ["Recommended"], body: "System webview + Rust core with the best size and memory balance." }),
+              h.option({ id: "swiftui", title: "SwiftUI", tags: ["Native macOS"], body: "Native Apple stack with the strongest macOS integration." })
+            ],
+            rows: [
+              h.feature({ id: "platforms", title: "macOS and Windows", cells: { electron: "yes", tauri: "yes", swiftui: { icon: "no", detail: "A Windows release would require a second interface implementation." } } }),
+              h.feature({ id: "react-reuse", title: "Reuse the React interface", cells: { electron: "best", tauri: { icon: "partial", text: "Most", detail: "The React workspace carries over; native integrations move behind Rust commands." }, swiftui: "no" } }),
+              h.feature({ id: "installer-footprint", title: "Installer footprint", cells: { electron: { icon: "warn", text: "~120 MB", detail: "Chromium and Node ship with every application bundle." }, tauri: { icon: "best", text: "~12 MB", detail: "Uses the operating-system webview; only the Rust core ships with the app." }, swiftui: { icon: "yes", text: "~8 MB", detail: "Native frameworks are provided by macOS." } } }),
+              h.feature({ id: "idle-memory", title: "Idle memory", cells: { electron: { icon: "warn", text: "~180 MB", detail: "A dedicated Chromium process provides consistency at the cost of memory." }, tauri: { icon: "best", text: "~55 MB", detail: "The system webview and Rust process keep the baseline small." }, swiftui: { icon: "yes", text: "~45 MB" } } }),
+              h.feature({ id: "native-integrations", title: "Native integrations", cells: { electron: "partial", tauri: "yes", swiftui: "best" } }),
+              h.feature({ id: "auto-update", title: "Auto-update maturity", cells: { electron: "best", tauri: { icon: "partial", detail: "The updater is production-ready but requires more signing and release plumbing." }, swiftui: "yes" } }),
+              h.feature({ id: "team-fit", title: "Team fit", cells: { electron: "TypeScript", tauri: "TypeScript + Rust", swiftui: "Swift ramp-up" } }),
+              h.feature({ id: "estimated-beta", title: "Estimated beta", cells: { electron: "5 weeks", tauri: "7 weeks", swiftui: "10 weeks" } })
+            ]
+          }),
+          h.bucket({
+            id: "release-sequence",
+            prompt: "Place each capability in the release sequence.",
+            buckets: ["Ship in beta", "Next release", "Not planned"],
+            options: [
+              h.option({ id: "offline-collections", title: "Offline collections", body: miniWireframes.offline }),
+              h.option({ id: "command-palette", title: "Command palette", body: miniWireframes.command }),
+              h.option({ id: "saved-views", title: "Saved views", body: miniWireframes.views }),
+              h.option({ id: "inline-comments", title: "Inline comments", body: miniWireframes.comments }),
+              h.option({ id: "team-permissions", title: "Team permissions", body: miniWireframes.team }),
+              h.option({ id: "public-api", title: "Public API", body: miniWireframes.api }),
+              h.option({ id: "plugin-marketplace", title: "Plugin marketplace", body: miniWireframes.plugins }),
+              h.option({ id: "mobile-companion", title: "Mobile companion", body: miniWireframes.mobile })
+            ]
+          }),
+          h.flow({
+            id: "customer-journey",
+            prompt: "Review and correct the trial-to-paid journey.",
+            connections: [
+              { from: "Start trial", to: "Import own sources", label: "ready" },
+              { from: "Start trial", to: "Explore sample project", label: "not ready" },
+              { from: "Import own sources", to: "Create first synthesis" },
+              { from: "Explore sample project", to: "Create first synthesis" },
+              { from: "Create first synthesis", to: "Save a view", label: "personal value" },
+              { from: "Create first synthesis", to: "Invite teammate", label: "team value" },
+              { from: "Save a view", to: "Receive weekly brief" },
+              { from: "Invite teammate", to: "Discuss an insight" },
+              { from: "Discuss an insight", to: "Receive weekly brief" },
+              { from: "Receive weekly brief", to: "Upgrade", label: "day 10" }
+            ]
+          })
+        ]
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key.toLowerCase() !== "t") return;
+        const target = document.querySelector('.ih-evaluation-detail-button[data-detail-title="~12 MB"]');
+        target?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      });
+
+    </script>
+  </body>
+</html>

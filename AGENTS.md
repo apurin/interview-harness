@@ -22,6 +22,14 @@ Keep generated interview pages cheap to author. Move reusable layout, behavior, 
 
 Interview output should be easy for a one-off LLM reader to consume. Prefer human-readable exports until there is a concrete programmatic consumer.
 
+## README Demo Policy
+
+- Keep the README animation reproducible from `demo/`.
+- When changing `assets/interview-harness-demo.gif`, update `demo/interview.html`, the real captures in `demo/frames/`, `demo/build-readme-gif.py`, and `demo/README.md` in the same change.
+- Use real Interview Harness captures; do not recreate the product UI.
+- A temporary localhost server is acceptable for capture only. Generated interviews remain local files that need no hosting.
+- Verify that `python3 demo/build-readme-gif.py` reproduces the committed GIF.
+
 ## Open Design Space
 
 Do not lock hosting, distribution, persistence, schemas, or the final question taxonomy before implementation work needs those decisions.
