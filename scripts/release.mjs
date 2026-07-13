@@ -34,6 +34,18 @@ function render(sourcePath, targetPath) {
   );
 }
 
+function authoringReference(content) {
+  const start = content.indexOf("## Authoring API");
+  const guidance = content.indexOf("\n\nBefore presenting", start);
+  return content.slice(start, guidance === -1 ? undefined : guidance).trim();
+}
+
+const fullSkillTemplate = readFileSync("templates/skills/interview-harness/SKILL.md", "utf8");
+const minimalSkillTemplate = readFileSync("templates/skills/interview-harness-min/SKILL.md", "utf8");
+if (authoringReference(fullSkillTemplate) !== authoringReference(minimalSkillTemplate)) {
+  throw new Error("Minimal and full skill authoring references differ");
+}
+
 console.log(`Preparing Interview Harness ${tag} on @${major}`);
 
 writeFileSync(

@@ -7,6 +7,7 @@ Keep generated interview pages cheap to author. Move reusable layout, behavior, 
 ## Repository Policy
 
 - Treat the skills as the authoring manuals. Update them when the public authoring surface changes.
+- Keep the minimal skill's authoring API and HTML-file reference identical to the full skill; omit only interview-planning guidance.
 - Keep `AGENTS.md` focused on project intent and maintenance policy. Do not duplicate API details, dependency versions, or examples from the library and skills.
 - Keep committed examples intentional and curated. Leave scratch interview artifacts untracked.
 - Favor readable, inspectable source over packaging opacity.
