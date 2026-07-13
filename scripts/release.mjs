@@ -24,6 +24,17 @@ function run(command, args) {
   execFileSync(command, args, { stdio: "inherit" });
 }
 
+function read(command, args) {
+  return execFileSync(command, args, { encoding: "utf8" }).trim();
+}
+
+async function fetchChecked(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`${options?.method || "GET"} ${url} returned ${response.status}`);
+  }
+}
+
 function render(sourcePath, targetPath) {
   writeFileSync(
     targetPath,
@@ -46,6 +57,18 @@ if (authoringReference(fullSkillTemplate) !== authoringReference(minimalSkillTem
   throw new Error("Minimal and full skill authoring references differ");
 }
 
+if (read("git", ["status", "--porcelain"])) {
+  throw new Error("Commit or remove working-tree changes before releasing");
+}
+
+if (read("git", ["branch", "--show-current"]) !== "main") {
+  throw new Error("Releases must be run from main");
+}
+
+if (read("git", ["tag", "--list", tag])) {
+  throw new Error(`${tag} already exists`);
+}
+
 console.log(`Preparing Interview Harness ${tag} on @${major}`);
 
 writeFileSync(
@@ -59,7 +82,7 @@ render("templates/skills/interview-harness-min/SKILL.md", "skills/interview-harn
 
 run(process.execPath, ["--check", "interview-harness.js"]);
 run("git", ["add", "-A"]);
-run("git", ["commit", "-m", `Release ${tag}`]);
+run("git", ["commit", "--allow-empty", "-m", `Release ${tag}`]);
 run("git", ["tag", tag]);
 run("git", ["push", "origin", "HEAD:main"]);
 run("git", ["push", "origin", tag]);
@@ -68,7 +91,7 @@ for (const alias of [major, "latest"]) {
   for (const asset of assets) {
     const url = `https://purge.jsdelivr.net/gh/${repo}@${alias}/${asset}`;
     console.log(`Purging ${url}`);
-    await fetch(url);
+    await fetchChecked(url);
   }
 }
 
@@ -76,7 +99,7 @@ for (const alias of [tag, major, "latest"]) {
   for (const asset of assets) {
     const url = `https://cdn.jsdelivr.net/gh/${repo}@${alias}/${asset}`;
     console.log(`Fetching ${url}`);
-    await fetch(url, { method: "HEAD" });
+    await fetchChecked(url, { method: "HEAD" });
   }
 }
 
