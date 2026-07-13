@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "3.0.1";
+  const VERSION = "4.0.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
@@ -20,190 +20,166 @@
     html: "https://esm.sh/@codemirror/lang-html@6.4.11",
     json: "https://esm.sh/@codemirror/lang-json@6.0.2"
   };
+  const MARKED_URL = "https://cdn.jsdelivr.net/npm/marked@18.0.5/lib/marked.umd.js";
   let sortablePromise = null;
   let visNetworkPromise = null;
   let codeMirrorPromise = null;
   let codeMirrorThemePromise = null;
+  let markedPromise = null;
   const codeMirrorLanguagePromises = {};
 
-  // Authoring helpers --------------------------------------------------------
-
-  const tagged = (key, value) => (config) => Object.assign({ [key]: value }, config || {});
-  const choice = tagged("type", "choice");
-  const evaluation = tagged("type", "evaluation");
-  const bucket = tagged("type", "bucket");
-  const edit = tagged("type", "edit");
-  const flow = tagged("type", "flow");
-  const frame = tagged("view", "frame");
-  const html = tagged("view", "html");
-  const code = tagged("view", "code");
-
-  function option(config) {
-    return Object.assign({}, config || {});
-  }
-
-  function feature(config) {
-    return Object.assign({}, config || {});
-  }
-
   const questionNormalizers = {
-    choice: (raw) => ({
-      select: normalizeChoiceSelect(raw.select),
-      cardsPerRow: normalizeCardsPerRow(raw.cardsPerRow),
-      options: normalizeOptions(raw.options)
-    }),
-    evaluation: (raw) => ({
+    choice: normalizeChoiceQuestion,
+    compare: (raw) => ({
+      type: "evaluation",
       select: "one",
-      options: normalizeOptions(raw.options || raw.columns),
-      rows: normalizeEvaluationRows(raw.rows || raw.features || raw.criteria)
+      options: normalizeCards(raw.cards, raw.id, raw.sourcePath),
+      rows: normalizeCriteria(raw.criteria, raw.id, raw.sourcePath, asArray(raw.cards).length)
     }),
-    bucket: (raw) => ({
-      buckets: normalizeBuckets(raw.buckets || ["yes", "maybe", "no"]),
-      options: normalizeOptions(raw.options)
+    categorize: (raw) => ({
+      type: "bucket",
+      buckets: normalizeCategories(raw.categories, raw.id, raw.sourcePath),
+      options: normalizeCards(raw.cards, raw.id, raw.sourcePath)
     }),
     flow: (raw) => ({
-      connections: normalizeFlowConnections(raw.connections, true)
+      connections: normalizeFlowConnections(raw.connections, true, raw.sourcePath)
     }),
     edit: (raw) => ({
-      artifact: normalizeArtifact(raw.artifact || raw.body || raw.content || raw.value || ""),
-      language: raw.language || ""
+      artifact: { view: "code", lang: String(raw.language || ""), value: String(raw.value || "") },
+      language: String(raw.language || "")
     })
   };
 
-  // Normalization ------------------------------------------------------------
-
-  function normalizeConfig(input, target) {
-    const config = Object.assign({}, input || {});
-    config.target = target || config.target || `#${DEFAULT_TARGET_ID}`;
-    config.title = String(config.title || "Interview");
-    config.intro = String(config.intro || "");
-    config.questions = asArray(config.questions).map(normalizeQuestion);
-    config.storageKey = config.storageKey === false ? false : String(config.storageKey || defaultStorageKey(config.title));
-    config.copyTextLabel = config.copyTextLabel || "Copy text";
-    return config;
-  }
-
-  function normalizeQuestion(input, index) {
-    const raw = Object.assign({}, input || {});
-    const prompt = String(raw.prompt || raw.question || raw.title || `Question ${index + 1}`);
-    const type = String(raw.type || "").toLowerCase();
-    const id = String(raw.id || slugify(prompt) || `q${index + 1}`);
-    const normalize = questionNormalizers[type];
-    if (!normalize) throw new TypeError(`Unsupported question type: ${type || "(missing)"}`);
-    return Object.assign({ type, id, prompt }, normalize(raw));
-  }
-
-  function normalizeChoiceSelect(select) {
-    return select === "many" ? "many" : "one";
-  }
-
-  function normalizeCardsPerRow(value) {
-    if (value === undefined || value === null || value === "" || value === "auto") return "auto";
-    const numeric = Number(value);
-    return [1, 2, 3, 4].includes(numeric) ? numeric : "auto";
-  }
-
-  function normalizeOptions(input) {
-    return asArray(input).map((entry, index) => normalizeOption(entry, index));
-  }
-
-  function normalizeOption(entry, index) {
-    if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
-      const title = String(entry);
-      return { id: slugify(title) || `option-${index + 1}`, title, body: "" };
-    }
-
-    const raw = Object.assign({}, entry || {});
-    const title = String(raw.title || raw.label || raw.name || raw.id || `Option ${index + 1}`);
+  function normalizeChoiceQuestion(raw) {
+    if (raw.multiple !== undefined && typeof raw.multiple !== "boolean") throw new TypeError(`${raw.sourcePath}.multiple must be a boolean.`);
     return {
-      id: String(raw.id || slugify(title) || `option-${index + 1}`),
-      title,
-      body: raw.body || raw.detail || raw.description || raw.preview || "",
-      tags: raw.tags || null
+      select: raw.multiple === true ? "many" : "one",
+      options: normalizeCards(raw.cards, raw.id, raw.sourcePath)
     };
   }
 
-  function normalizeBuckets(input) {
-    return asArray(input).map((bucket, index) => {
-      if (typeof bucket === "string") return { id: slugify(bucket) || `bucket-${index + 1}`, title: bucket };
-      const raw = Object.assign({}, bucket || {});
-      const title = String(raw.title || raw.label || raw.name || raw.id || `Bucket ${index + 1}`);
-      return { id: String(raw.id || slugify(title) || `bucket-${index + 1}`), title };
-    });
+  // Normalization ------------------------------------------------------------
+
+  function normalizeConfig(input) {
+    const raw = requireObject(input, "interview");
+    assertKnownFields(raw, ["title", "markdownIntro", "questions"], "interview");
+    const title = requiredString(raw.title, "interview.title");
+    const questions = requireArray(raw.questions, "interview.questions", true).map(normalizeQuestion);
+    return {
+      target: `#${DEFAULT_TARGET_ID}`,
+      title,
+      intro: optionalString(raw.markdownIntro, "interview.markdownIntro"),
+      questions,
+      storageKey: defaultStorageKey(title),
+      copyTextLabel: "Copy text",
+      fingerprint: configFingerprint({ title, questions })
+    };
   }
 
-  function normalizeEvaluationRows(input) {
-    return asArray(input).map((entry, index) => {
-      if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
-        const title = String(entry);
-        return { id: slugify(title) || `feature-${index + 1}`, title, body: "", cells: {}, group: "" };
-      }
+  function normalizeQuestion(input, index) {
+    const path = `interview.questions[${index}]`;
+    const raw = requireObject(input, path);
+    const type = requiredString(raw.type, `${path}.type`).toLowerCase();
+    const allowed = {
+      choice: ["type", "prompt", "multiple", "cards"],
+      compare: ["type", "prompt", "cards", "criteria"],
+      categorize: ["type", "prompt", "categories", "cards"],
+      flow: ["type", "prompt", "connections"],
+      edit: ["type", "prompt", "value", "language"]
+    }[type];
+    if (!allowed) throw new TypeError(`${path}.type must be choice, compare, categorize, flow, or edit.`);
+    assertKnownFields(raw, allowed, path);
+    const id = `q${index + 1}`;
+    raw.id = id;
+    raw.sourcePath = path;
+    const prompt = requiredString(raw.prompt, `${path}.prompt`);
+    const normalize = questionNormalizers[type];
+    const normalized = normalize(raw);
+    return Object.assign({ type: normalized.type || type, id, prompt }, normalized);
+  }
 
-      const raw = Object.assign({}, entry || {});
-      const title = String(raw.title || raw.label || raw.name || raw.id || `Feature ${index + 1}`);
+  function normalizeCards(input, questionId, sourcePath) {
+    return requireArray(input, `${sourcePath}.cards`, true).map((entry, index) => {
+      const path = `${sourcePath}.cards[${index}]`;
+      const raw = requireObject(entry, path);
+      assertKnownFields(raw, ["title", "markdown", "markdownTooltip", "htmlPreview", "tags"], path);
+      const htmlPreview = optionalString(raw.htmlPreview, `${path}.htmlPreview`);
+      const tags = raw.tags === undefined ? [] : requireArray(raw.tags, `${path}.tags`).map((tag, tagIndex) => requiredString(tag, `${path}.tags[${tagIndex}]`));
+      const previewType = !htmlPreview ? "none" : htmlPreview.startsWith("file:") ? "file" : "inline";
+      if (previewType === "file" && !htmlPreview.slice("file:".length).trim()) throw new TypeError(`${path}.htmlPreview must include a filename after file:.`);
       return {
-        id: String(raw.id || slugify(title) || `feature-${index + 1}`),
-        title,
-        body: raw.body || raw.detail || raw.description || "",
-        group: raw.group || raw.section || "",
-        cells: normalizeEvaluationCells(raw.cells || raw.values || raw.options || {})
+        id: `${questionId}-card${index + 1}`,
+        title: requiredString(raw.title, `${path}.title`),
+        markdown: optionalString(raw.markdown, `${path}.markdown`),
+        markdownTooltip: optionalString(raw.markdownTooltip, `${path}.markdownTooltip`),
+        htmlPreview,
+        previewType,
+        tags
       };
     });
   }
 
-  function normalizeEvaluationCells(input) {
-    if (Array.isArray(input)) {
-      return Object.fromEntries(input.map((entry) => {
-        const raw = Object.assign({}, entry || {});
-        const id = String(raw.option || raw.optionId || raw.column || raw.id || "");
-        return id ? [id, normalizeEvaluationCell(raw)] : null;
-      }).filter(Boolean));
-    }
-    return Object.fromEntries(Object.entries(safeObject(input)).map(([key, value]) => [key, normalizeEvaluationCell(value)]));
+  function normalizeCategories(input, questionId, sourcePath) {
+    return requireArray(input, `${sourcePath}.categories`, true).map((title, index) => {
+      return { id: `${questionId}-category${index + 1}`, title: requiredString(title, `${sourcePath}.categories[${index}]`) };
+    });
   }
 
-  function normalizeEvaluationCell(input) {
-    if (input === undefined || input === null || input === "") return { icon: "", text: "", detail: "" };
-    if (typeof input === "string" || typeof input === "number" || typeof input === "boolean") {
-      const text = String(input);
-      return isEvaluationIcon(text) ? { icon: text, text: "", detail: "" } : { icon: "", text, detail: "" };
-    }
-    const raw = Object.assign({}, input || {});
-    const icon = raw.icon || raw.status || raw.value || "";
+  function normalizeCriteria(input, questionId, sourcePath, cardCount) {
+    return requireArray(input, `${sourcePath}.criteria`, true).map((entry, index) => {
+      const path = `${sourcePath}.criteria[${index}]`;
+      const raw = requireObject(entry, path);
+      assertKnownFields(raw, ["title", "markdownTooltip", "group", "values"], path);
+      const values = requireArray(raw.values, `${path}.values`);
+      if (values.length !== cardCount) throw new TypeError(`${path}.values must contain one value for each card (${cardCount}).`);
+      return {
+        id: `${questionId}-criterion${index + 1}`,
+        title: requiredString(raw.title, `${path}.title`),
+        markdownTooltip: optionalString(raw.markdownTooltip, `${path}.markdownTooltip`),
+        group: optionalString(raw.group, `${path}.group`),
+        cells: Object.fromEntries(values.map((value, valueIndex) => [`${questionId}-card${valueIndex + 1}`, normalizeComparisonValue(value, `${path}.values[${valueIndex}]`)]))
+      };
+    });
+  }
+
+  function normalizeComparisonValue(input, path) {
+    if (input === undefined || input === null) return { icon: "", text: "", detail: "" };
+    if (["string", "number", "boolean"].includes(typeof input)) return { icon: "", text: String(input), detail: "" };
+    const raw = requireObject(input, path);
+    assertKnownFields(raw, ["markdown", "markdownTooltip", "status"], path);
+    const status = optionalString(raw.status, `${path}.status`);
+    if (status && !["yes", "no", "partial", "unknown", "warning", "best"].includes(status)) throw new TypeError(`${path}.status must be yes, no, partial, unknown, warning, or best.`);
     return {
-      icon: isEvaluationIcon(icon) ? String(icon) : "",
-      text: valueToText(raw.text || raw.label || raw.title || (isEvaluationIcon(icon) ? "" : icon)),
-      detail: valueToText(raw.detail || raw.description || raw.note || raw.tooltip || "")
+      icon: status === "warning" ? "warn" : status,
+      text: optionalString(raw.markdown, `${path}.markdown`),
+      detail: optionalString(raw.markdownTooltip, `${path}.markdownTooltip`)
     };
   }
 
-  function normalizeArtifact(input) {
-    if (typeof input === "string") return { view: "code", lang: "", value: input };
-    if (input && input.view === "code") return input;
-    if (input && input.value !== undefined) return Object.assign({ view: "code", lang: "" }, input);
-    return { view: "code", lang: "", value: valueToText(input) };
-  }
-
-  function normalizeFlowConnections(input, strict) {
+  function normalizeFlowConnections(input, strict, sourcePath) {
     const connections = [];
-    const usedPairs = new Set();
-    asArray(input).forEach((entry) => {
-      const raw = Object.assign({}, entry || {});
-      const from = String(raw.from || "").trim();
-      const to = String(raw.to || "").trim();
+    const usedConnections = new Set();
+    const basePath = sourcePath ? `${sourcePath}.connections` : "flow.connections";
+    const source = strict ? requireArray(input, basePath, true) : asArray(input);
+    source.forEach((entry, index) => {
+      const entryPath = `${basePath}[${index}]`;
+      const raw = strict ? requireObject(entry, entryPath) : Object.assign({}, entry || {});
+      if (strict) assertKnownFields(raw, ["from", "to", "label"], entryPath);
+      const from = strict ? requiredString(raw.from, `${entryPath}.from`) : String(raw.from || "").trim();
+      const to = strict ? requiredString(raw.to, `${entryPath}.to`) : String(raw.to || "").trim();
       if (!from || !to) {
         if (strict) throw new TypeError("Flow connections require non-empty from and to names.");
         return;
       }
-      const pair = flowPairKey(from, to);
-      if (usedPairs.has(pair)) {
-        if (strict) throw new TypeError(`Flow nodes may have only one connection between them: ${from} / ${to}`);
+      const key = flowConnectionKey(from, to);
+      if (usedConnections.has(key)) {
+        if (strict) throw new TypeError(`Flow connections must be unique by direction: ${from} → ${to}`);
         return;
       }
-      usedPairs.add(pair);
+      usedConnections.add(key);
       const connection = { from, to };
-      const label = String(raw.label || raw.name || "").trim();
-      const comment = String(raw.comment || "");
+      const label = strict ? optionalString(raw.label, `${entryPath}.label`).trim() : String(raw.label || raw.name || "").trim();
+      const comment = strict ? "" : String(raw.comment || "");
       if (label) connection.label = label;
       if (comment) connection.comment = comment;
       connections.push(connection);
@@ -299,9 +275,9 @@
     }
   };
 
-  function createInitialState(questions) {
-    const answers = Object.fromEntries(questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
-    return { version: VERSION, step: 0, viewMode: "paged", commentEditor: null, detailPopover: null, answers };
+  function createInitialState(config) {
+    const answers = Object.fromEntries(config.questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
+    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", commentEditor: null, detailPopover: null, answers };
   }
 
   function initialAnswer(questionDef) {
@@ -310,6 +286,7 @@
 
   function mergeState(saved, current, questions) {
     if (!saved || typeof saved !== "object") return current;
+    if (saved.fingerprint !== current.fingerprint) return current;
     const next = Object.assign({}, current, {
       version: VERSION,
       viewMode: saved.viewMode === "all" || saved.viewMode === "paged" ? saved.viewMode : current.viewMode,
@@ -387,7 +364,7 @@
     const selected = questionDef.options.find((entry) => entry.id === answer.selected);
     if (selected) lines.push(`Selected: ${selected.title}`);
     appendComments(lines, optionComments(questionDef.options, answer.optionComments), "Column comments:");
-    appendComments(lines, evaluationRowComments(questionDef.rows, answer.rowComments), "Feature row comments:");
+    appendComments(lines, evaluationRowComments(questionDef.rows, answer.rowComments), "Criterion comments:");
   }
 
   function appendBucketAnswer(lines, questionDef, answer) {
@@ -552,6 +529,8 @@
     }
     .ih-title { margin: 0; max-width: 980px; font-size: clamp(18px, 2vw, 24px); line-height: 1.15; letter-spacing: 0; overflow-wrap: anywhere; }
     .ih-intro { margin: 4px 0 0; max-width: 980px; color: var(--ih-muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+    .ih-intro > :first-child { margin-top: 0; }
+    .ih-intro > :last-child { margin-bottom: 0; }
     .ih-actions { display: flex; gap: 8px; justify-content: end; flex-wrap: wrap; }
 
     .ih-timeline { max-width: var(--ih-max); margin: 0 auto; padding: 0 clamp(14px, 3vw, 34px) 10px; overflow-x: auto; }
@@ -751,6 +730,13 @@
     .ih-rich { min-width: 0; color: var(--ih-muted); line-height: 1.45; display: grid; gap: 12px; align-content: start; }
     .ih-rich p { margin: 0; }
     .ih-rich ul { margin: 8px 0 0; }
+    .ih-markdown > :first-child { margin-top: 0; }
+    .ih-markdown > :last-child { margin-bottom: 0; }
+    .ih-markdown p, .ih-markdown ul, .ih-markdown ol, .ih-markdown pre, .ih-markdown blockquote { margin-block: .5em; }
+    .ih-markdown ul, .ih-markdown ol { padding-left: 1.35em; }
+    .ih-markdown code { font: .92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ih-markdown pre { overflow: auto; padding: 8px; border-radius: var(--ih-radius); background: var(--ih-code-bg); color: var(--ih-code-ink); }
+    .ih-markdown a { color: var(--ih-accent); }
     .ih-frame-shell { overflow: hidden; border-radius: var(--ih-radius); background: var(--ih-surface-2); }
     .ih-frame-bar { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 4px 3px 9px; border-bottom: 1px solid var(--ih-line); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); }
     .ih-frame-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ih-muted); font-size: 11px; font-weight: 760; line-height: 1.1; }
@@ -759,6 +745,7 @@
     .ih-frame-open svg { width: 14px; height: 14px; }
     .ih-frame { display: block; width: 100%; height: min(54vh, 520px); border: 0; background: var(--ih-surface-2); }
     .ih-html-preview { overflow: auto; }
+    .ih-html-preview > svg { display: block; width: 100%; height: auto; }
     .ih-html-preview > * + * { margin-top: 9px; }
     .ih-html-preview figure { margin: 0; display: grid; gap: 6px; }
     .ih-html-preview img { display: block; width: 100%; max-height: 240px; object-fit: cover; border: 0; border-radius: var(--ih-radius); background: var(--ih-surface-2); }
@@ -836,6 +823,7 @@
     .ih-evaluation-column { min-width: 0; width: 100%; display: grid; gap: 6px; color: inherit; }
     .ih-evaluation-column-actions { min-height: 26px; display: flex; align-items: start; justify-content: space-between; gap: 8px; }
     .ih-evaluation-column-title { min-width: 0; font-size: 14px; font-weight: 850; line-height: 1.18; overflow-wrap: normal; word-break: normal; hyphens: auto; }
+    .ih-evaluation-column-markdown { color: var(--ih-muted); font-size: 11px; font-weight: 600; line-height: 1.35; }
     .ih-evaluation-column-tags { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
     .ih-evaluation-column-tag { max-width: 100%; border-radius: 999px; background: color-mix(in srgb, var(--ih-ink) 8%, transparent); color: currentColor; opacity: .74; padding: 3px 6px; font-size: 10px; font-weight: 760; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ih-evaluation-group-row th { background: color-mix(in srgb, var(--ih-ink) 6%, var(--ih-surface-2)); color: var(--ih-accent); font-size: 12px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; padding: 8px 12px; }
@@ -845,7 +833,8 @@
     .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
     .ih-evaluation-row-title .ih-comment-button { align-self: start; }
     .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
-    .ih-evaluation-cell-shell { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .ih-evaluation-cell-shell { position: relative; width: 100%; min-height: 30px; display: block; }
+    .ih-evaluation-cell-shell > .ih-evaluation-detail-button { position: absolute; top: 50%; right: 2px; width: 20px; height: 20px; opacity: .7; transform: translateY(-50%); }
     .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.25; max-width: 100%; overflow-wrap: normal; word-break: normal; }
     .ih-evaluation-cell svg { width: 16px; height: 16px; fill: currentColor; stroke: none; flex: 0 0 auto; }
     .ih-evaluation-cell[data-icon="yes"] { color: color-mix(in srgb, var(--ih-good) 78%, var(--ih-muted)); }
@@ -913,7 +902,7 @@
     .ih-bucket-card .ih-rich { font-size: 12px; line-height: 1.35; }
     .ih-bucket-card > .ih-option-title { grid-column: 2; grid-row: 1; align-self: center; }
     .ih-bucket-card > .ih-bucket-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
-    .ih-bucket-card > .ih-rich { grid-column: 1 / -1; grid-row: 2; }
+    .ih-bucket-card-content { grid-column: 1 / -1; grid-row: 2; min-width: 0; width: 100%; display: grid; gap: 8px; }
     .ih-bucket-card.is-dragging { opacity: .55; }
     .ih-bucket.is-drop-target { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
     .ih-grip {
@@ -965,7 +954,7 @@
     .ih-flow-selected-value { min-width: 0; }
     .ih-flow-selection-actions { display: inline-flex; align-items: center; gap: 8px; }
     .ih-edit { display: grid; gap: 10px; }
-    .ih-code-editor-host, .ih-code-fallback, .ih-code-viewer-host, .ih-code-viewer-fallback {
+    .ih-code-editor-host, .ih-code-fallback {
       min-height: 440px;
       border: 0;
       border-radius: var(--ih-radius);
@@ -973,19 +962,13 @@
       color: var(--ih-code-ink);
       overflow: hidden;
     }
-    .ih-code-editor-host, .ih-code-viewer-host { display: none; }
+    .ih-code-editor-host { display: none; }
     .ih-code-editor-host .cm-editor { min-height: 440px; }
-    .ih-code-editor-host .cm-editor, .ih-code-viewer-host .cm-editor { font-size: 13px; }
-    .ih-code-editor-host .cm-scroller, .ih-code-viewer-host .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; }
+    .ih-code-editor-host .cm-editor { font-size: 13px; }
+    .ih-code-editor-host .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; }
     .ih-code-fallback { display: block; width: 100%; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; white-space: pre; }
     [data-edit].has-editor .ih-code-editor-host { display: block; }
     [data-edit].has-editor .ih-code-fallback { display: none; }
-    .ih-code-viewer { display: grid; margin-top: 8px; }
-    .ih-code-viewer-host, .ih-code-viewer-fallback { min-height: 0; }
-    .ih-code-viewer-host .cm-editor { min-height: 0; }
-    .ih-code-viewer.has-editor .ih-code-viewer-host { display: block; }
-    .ih-code-viewer.has-editor .ih-code-viewer-fallback { display: none; }
-    .ih-code-viewer-fallback { margin: 0; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
     .ih-editor-loading { color: var(--ih-muted); font-size: 13px; padding: 12px 0 0; }
 
     .ih-output { min-height: 420px; max-height: 62vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--ih-code-bg); color: var(--ih-code-ink); border-radius: var(--ih-radius); padding: 16px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -1029,7 +1012,7 @@
     .ih-evaluation-tooltip.is-below::before { top: -6px; border-right: 0; border-bottom: 0; }
     .ih-evaluation-tooltip.is-above::before { bottom: -6px; border-left: 0; border-top: 0; }
     .ih-evaluation-tooltip-title { margin: 0 0 4px; color: var(--ih-accent); font-size: 11px; font-weight: 850; line-height: 1.2; }
-    .ih-evaluation-tooltip-body { margin: 0; font-size: 12px; font-weight: 650; line-height: 1.42; white-space: pre-wrap; }
+    .ih-evaluation-tooltip-body { margin: 0; font-size: 12px; font-weight: 650; line-height: 1.42; }
 
     @media (max-width: 900px) {
       .ih-topbar-inner { grid-template-columns: 1fr; }
@@ -1068,7 +1051,7 @@
               <div class="ih-mark">IH</div>
               <div>
                 <h1 class="ih-title">${escapeHTML(instance.config.title)}</h1>
-                ${instance.config.intro ? `<p class="ih-intro">${escapeHTML(instance.config.intro)}</p>` : ""}
+                ${instance.config.intro ? `<div class="ih-intro ih-markdown">${renderMarkdown(instance.config.intro)}</div>` : ""}
               </div>
             </div>
             <div class="ih-actions">
@@ -1151,9 +1134,9 @@
   function renderChoice(questionDef, answer) {
     const multiple = questionDef.select === "many";
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
-    const useGrid = questionDef.cardsPerRow !== "auto" || questionDef.options.some((entry) => entry.body);
-    const gridClass = useGrid ? "ih-grid" : "ih-stack";
-    const layoutAttr = questionDef.cardsPerRow === "auto" ? "" : ` data-cards-per-row="${escapeAttr(questionDef.cardsPerRow)}"`;
+    const layout = cardLayout(questionDef.options);
+    const gridClass = layout === "stack" ? "ih-stack" : "ih-grid";
+    const layoutAttr = Number.isInteger(layout) ? ` data-cards-per-row="${layout}"` : "";
     const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id))).join("");
     const addRow = multiple ? renderAddRow("Add another option") : "";
     return `<div class="${gridClass}"${layoutAttr}>${options}</div>${addRow}`;
@@ -1166,12 +1149,13 @@
         <div class="ih-option-top">
           ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
           <div class="ih-option-actions">
+            ${entry.custom ? "" : renderTooltipButton(entry.title, entry.markdownTooltip)}
             ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on option")}
             ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
           </div>
         </div>
         ${renderTags(entry.tags)}
-        ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
+        ${renderCardContent(entry)}
       </article>
     `;
   }
@@ -1199,7 +1183,7 @@
     return `
       <div class="ih-evaluation-board">
         <div class="ih-evaluation-head">
-          <p class="ih-evaluation-note">Select one column. Comment on columns or feature rows when the comparison needs clarification.</p>
+          <p class="ih-evaluation-note">Select one column. Comment on columns or criteria when the comparison needs clarification.</p>
         </div>
         <div class="ih-evaluation-header-frame" data-evaluation-header-frame>
           <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
@@ -1242,16 +1226,17 @@
   }
 
   function renderEvaluationColumn(questionDef, answer, entry, isSelected) {
-    const bodyText = richPlainText(entry.body);
     return `
       <th class="${isSelected ? "is-selected" : ""}" data-action="choose-evaluation-option" data-option-id="${escapeAttr(entry.id)}" tabindex="0" role="button" aria-pressed="${isSelected ? "true" : "false"}">
         <div class="ih-evaluation-column ${isSelected ? "is-selected" : ""}">
           <span class="ih-evaluation-column-actions">
             ${renderCommentButton("evaluation-option-comment", entry.id, answer.optionComments && answer.optionComments[entry.id], "Comment on column option")}
-            ${bodyText ? `<span class="ih-evaluation-detail-button" data-detail-title="${escapeAttr(entry.title)}" data-detail="${escapeAttr(bodyText)}" aria-label="Details for ${escapeAttr(entry.title)}">${infoIcon()}</span>` : ""}
+            ${renderTooltipButton(entry.title, entry.markdownTooltip)}
           </span>
           <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
           ${renderEvaluationColumnTags(entry.tags)}
+          ${entry.markdown ? `<span class="ih-evaluation-column-markdown ih-markdown">${renderMarkdown(entry.markdown)}</span>` : ""}
+          ${entry.htmlPreview ? renderCardContent(Object.assign({}, entry, { markdown: "" })) : ""}
         </div>
       </th>
     `;
@@ -1269,9 +1254,11 @@
         <th>
           <div class="ih-evaluation-row-title">
             <span>${escapeHTML(row.title)}</span>
-            ${renderCommentButton("evaluation-row-comment", row.id, answer.rowComments && answer.rowComments[row.id], "Comment on feature row")}
+            <span class="ih-option-actions">
+              ${renderTooltipButton(row.title, row.markdownTooltip)}
+              ${renderCommentButton("evaluation-row-comment", row.id, answer.rowComments && answer.rowComments[row.id], "Comment on comparison criterion")}
+            </span>
           </div>
-          ${row.body ? `<p>${escapeHTML(richPlainText(row.body))}</p>` : ""}
         </th>
         ${questionDef.options.map((optionDef) => {
           const cell = row.cells && row.cells[optionDef.id] || {};
@@ -1283,17 +1270,17 @@
 
   function renderEvaluationCell(cell) {
     const icon = isEvaluationIcon(cell && cell.icon) ? cell.icon : "";
-    const text = cell && cell.text ? cell.text : evaluationIconLabel(icon);
+    const text = cell && cell.text ? cell.text : "";
     const detail = cell && cell.detail ? String(cell.detail) : "";
-    const label = text || evaluationIconLabel(icon) || "value";
+    const label = plainMarkdown(text) || evaluationIconLabel(icon) || "value";
     const value = icon || text
-      ? `<span class="ih-evaluation-cell" data-icon="${escapeAttr(icon)}">${icon ? evaluationIcon(icon) : ""}${text ? `<span>${escapeHTML(text)}</span>` : ""}</span>`
+      ? `<span class="ih-evaluation-cell" data-icon="${escapeAttr(icon)}">${icon ? evaluationIcon(icon) : ""}${text ? `<span class="ih-markdown">${renderMarkdown(text)}</span>` : icon ? `<span>${escapeHTML(evaluationIconLabel(icon))}</span>` : ""}</span>`
       : `<span class="ih-evaluation-cell">-</span>`;
     if (!detail) return value;
     return `
       <span class="ih-evaluation-cell-shell">
         ${value}
-        <span class="ih-evaluation-detail-button" data-detail-title="${escapeAttr(label)}" data-detail="${escapeAttr(detail)}" aria-label="Details for ${escapeAttr(label)}">${infoIcon()}</span>
+        ${renderTooltipButton(label, detail)}
       </span>
     `;
   }
@@ -1338,9 +1325,13 @@
         <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
         <div class="ih-bucket-actions">
           ${renderMoveMenu(questionDef, entry, currentBucketId)}
+          ${renderTooltipButton(entry.title, entry.markdownTooltip)}
           ${renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on bucket option")}
         </div>
-        ${entry.body ? `<div class="ih-rich">${renderRich(entry.body)}</div>` : ""}
+        <div class="ih-bucket-card-content">
+          ${renderTags(entry.tags)}
+          ${renderCardContent(entry)}
+        </div>
       </article>
     `;
   }
@@ -1456,51 +1447,76 @@
     `;
   }
 
-  function renderRich(value) {
-    if (value === null || value === undefined || value === "") return "";
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return `<p>${escapeHTML(value)}</p>`;
-    if (Array.isArray(value)) return value.map(renderRich).join("");
-    if (value.view === "frame") {
-      const height = value.height ? ` style="height:${escapeAttr(value.height)}"` : "";
-      const title = value.title || value.src || "Preview";
-      const sourceName = value.fileName || value.filename || frameSourceName(value.src) || title;
-      const openButton = value.src
-        ? `<a class="ih-frame-open" href="${escapeAttr(value.src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>`
-        : value.srcdoc
-          ? `<a class="ih-frame-open" href="about:blank" target="_blank" rel="noopener" data-frame-srcdoc="${escapeAttr(value.srcdoc)}" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>`
-          : "";
-      const bar = `
-        <div class="ih-frame-bar">
-          <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
-          ${openButton}
-        </div>`;
-      const iframe = value.srcdoc
-        ? `<iframe class="ih-frame" title="${escapeAttr(title)}" srcdoc="${escapeAttr(value.srcdoc)}"${height}></iframe>`
-        : `<iframe class="ih-frame" title="${escapeAttr(title)}" src="${escapeAttr(value.src || "")}"${height}></iframe>`;
-      return `<div class="ih-frame-shell">${bar}${iframe}</div>`;
-    }
-    if (value.view === "html") return `<div class="ih-html-preview">${value.markup || ""}</div>`;
-    if (value.view === "code") {
-      return renderCodeViewer(value);
-    }
-    return `<p>${escapeHTML(valueToText(value))}</p>`;
+  function cardLayout(cards) {
+    if (cards.some((card) => card.previewType === "file")) return 1;
+    if (cards.some((card) => card.previewType === "inline")) return 2;
+    return cards.some((card) => card.markdown) ? "auto" : "stack";
   }
 
-  function renderCodeViewer(value) {
-    const codeText = valueToText(value.value);
-    const lang = value.lang || value.language || "";
-    return `
-      <div class="ih-code-viewer" data-code-viewer-shell>
-        <pre class="ih-code-viewer-fallback"><code>${escapeHTML(codeText)}</code></pre>
-        <div class="ih-code-viewer-host" data-code-viewer data-lang="${escapeAttr(lang)}" aria-label="Code preview"></div>
+  function renderCardContent(card) {
+    const parts = [];
+    if (card.markdown) parts.push(`<div class="ih-rich ih-markdown">${renderMarkdown(card.markdown)}</div>`);
+    if (card.previewType === "inline") parts.push(`<div class="ih-html-preview">${card.htmlPreview}</div>`);
+    if (card.previewType === "file") parts.push(renderFilePreview(card));
+    return parts.join("");
+  }
+
+  function renderFilePreview(card) {
+    const src = card.htmlPreview.slice("file:".length).trim();
+    const sourceName = frameSourceName(src) || card.title;
+    return `<div class="ih-frame-shell">
+      <div class="ih-frame-bar">
+        <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
+        <a class="ih-frame-open" href="${escapeAttr(src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>
       </div>
-    `;
+      <iframe class="ih-frame" title="${escapeAttr(card.title)}" src="${escapeAttr(src)}"></iframe>
+    </div>`;
   }
 
-  function renderList(entries) {
-    const values = asArray(entries);
-    if (!values.length) return "";
-    return `<ul>${values.map((entry) => `<li>${escapeHTML(valueToText(entry))}</li>`).join("")}</ul>`;
+  function renderTooltipButton(title, markdown) {
+    if (!markdown) return "";
+    return `<button class="ih-evaluation-detail-button" type="button" data-detail-title="${escapeAttr(title)}" data-detail="${escapeAttr(markdown)}" aria-label="Details for ${escapeAttr(title)}">${infoIcon()}</button>`;
+  }
+
+  function renderMarkdown(value) {
+    const source = String(value || "");
+    if (!source) return "";
+    if (!global.marked || typeof global.marked.parse !== "function") return `<p>${escapeHTML(source).replace(/\n/g, "<br>")}</p>`;
+    return sanitizeMarkdownHTML(global.marked.parse(source, { async: false, gfm: true, breaks: false }));
+  }
+
+  function sanitizeMarkdownHTML(markup) {
+    const template = document.createElement("template");
+    template.innerHTML = String(markup || "");
+    template.content.querySelectorAll("script, style, iframe, object, embed, link, meta, form, input, button, textarea, select").forEach((node) => node.remove());
+    template.content.querySelectorAll("*").forEach((node) => {
+      Array.from(node.attributes).forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        if (name.startsWith("on") || name === "style" || name === "srcdoc") node.removeAttribute(attribute.name);
+        if ((name === "href" || name === "src") && !safeMarkdownURL(attribute.value, name)) node.removeAttribute(attribute.name);
+      });
+      if (node.tagName === "A") {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    });
+    return template.innerHTML;
+  }
+
+  function safeMarkdownURL(value, attribute) {
+    const source = String(value || "").trim().toLowerCase();
+    if (!source || source.startsWith("#") || source.startsWith("./") || source.startsWith("../") || source.startsWith("/")) return true;
+    if (source.startsWith("https:") || source.startsWith("http:") || source.startsWith("mailto:")) return true;
+    return attribute === "src" && source.startsWith("data:image/");
+  }
+
+  function plainMarkdown(value) {
+    return String(value || "")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/[`*_>#~-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function renderTags(tags) {
@@ -1650,7 +1666,7 @@
     constructor(config) {
       this.config = config;
       this.root = resolveTarget(config.target);
-      this.state = createInitialState(config.questions);
+      this.state = createInitialState(config);
       this.state.viewMode = initialViewMode(config.questions);
       this.saveTimer = null;
       this.chromeFrame = null;
@@ -1665,6 +1681,9 @@
       this.onDocumentKeydown = (event) => this.onKeydown(event);
       this.load();
       this.mount();
+      ensureMarked().then(() => {
+        if (this.root.isConnected) this.render();
+      }).catch(() => {});
     }
 
     mount() {
@@ -2082,9 +2101,9 @@
         title.textContent = detail.title;
         tooltip.appendChild(title);
       }
-      const body = document.createElement("p");
+      const body = document.createElement("div");
       body.className = "ih-evaluation-tooltip-body";
-      body.textContent = detail.detail || "";
+      body.innerHTML = renderMarkdown(detail.detail || "");
       tooltip.appendChild(body);
     }
 
@@ -2210,7 +2229,8 @@
         });
       }
       const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name])));
-      const edges = new vis.DataSet(normalizeFlowConnections(answer.connections, false).map(flowVisConnectionRecord));
+      const flowConnections = normalizeFlowConnections(answer.connections, false);
+      const edges = new vis.DataSet(flowConnections.map((connection) => flowVisConnectionRecord(connection, flowConnections)));
       const network = new vis.Network(host, { nodes, edges }, {
         autoResize: true,
         nodes: {
@@ -2262,7 +2282,7 @@
               }, 0);
               return;
             }
-            const key = flowPairKey(from, to);
+            const key = flowConnectionKey(from, to);
             if (flowConnectionByKey(answer, key)) {
               callback(null);
               this.toast("Those nodes are already connected.");
@@ -2271,9 +2291,11 @@
             this.recordFlowHistory(context);
             const connection = { from, to };
             answer.connections.push(connection);
+            const reciprocal = flowReciprocalConnection(answer.connections, connection);
+            if (reciprocal) edges.update(flowVisConnectionRecord(reciprocal, answer.connections));
             answer.adding = false;
             answer.selected = { kind: "connection", key };
-            callback(flowVisConnectionRecord(connection));
+            callback(flowVisConnectionRecord(connection, answer.connections));
             this.activateContext(context);
             this.markChanged(answer);
             setTimeout(() => {
@@ -2552,7 +2574,7 @@
         delete answer.positions[selected.name];
       } else {
         this.recordFlowHistory(context);
-        answer.connections = answer.connections.filter((connection) => flowPairKey(connection.from, connection.to) !== selected.key);
+        answer.connections = answer.connections.filter((connection) => flowConnectionKey(connection.from, connection.to) !== selected.key);
       }
       answer.selected = null;
       this.activateContext(context);
@@ -2616,7 +2638,6 @@
 
     initCodeEditors() {
       this.root.querySelectorAll("[data-code-editor]").forEach((host) => this.initCodeEditor(host));
-      this.root.querySelectorAll("[data-code-viewer]").forEach((host) => this.initCodeViewer(host));
     }
 
     initCodeEditor(host) {
@@ -2647,18 +2668,6 @@
         if (loading) loading.textContent = "Syntax editor unavailable; using the plain editor.";
         if (fallback) autoGrowTextarea(fallback);
       });
-    }
-
-    initCodeViewer(host) {
-      const shell = host.closest("[data-code-viewer-shell]");
-      if (!shell) return;
-      const fallback = shell.querySelector(".ih-code-viewer-fallback");
-      const doc = fallback ? fallback.textContent || "" : "";
-      createCodeMirrorView(host, { doc, lang: host.dataset.lang || "", readOnly: true }).then((view) => {
-        if (!view) return;
-        shell.classList.add("has-editor");
-        this.codeEditors.push(view);
-      }).catch(() => {});
     }
 
     updateBucketFromDom(context) {
@@ -2904,7 +2913,7 @@
     reset() {
       if (!global.confirm("Reset this interview and clear saved answers?")) return;
       const viewMode = this.state.viewMode;
-      this.state = createInitialState(this.config.questions);
+      this.state = createInitialState(this.config);
       this.state.viewMode = viewMode;
       this.flowHistories.clear();
       if (this.config.storageKey) {
@@ -2950,6 +2959,20 @@
   }
 
   // Utilities ----------------------------------------------------------------
+
+  function ensureMarked() {
+    if (global.marked && typeof global.marked.parse === "function") return Promise.resolve(global.marked);
+    if (markedPromise) return markedPromise;
+    markedPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = MARKED_URL;
+      script.async = true;
+      script.onload = () => global.marked ? resolve(global.marked) : reject(new Error("Marked did not attach to window."));
+      script.onerror = () => reject(new Error("Marked failed to load."));
+      document.head.appendChild(script);
+    });
+    return markedPromise;
+  }
 
   function ensureSortable() {
     if (global.Sortable) return Promise.resolve(global.Sortable);
@@ -3025,7 +3048,6 @@
 
   function codeMirrorExtensions(EditorView, basicSetup, theme, language, options) {
     const extensions = [basicSetup, theme, language, EditorView.lineWrapping];
-    if (options.readOnly) extensions.push(EditorView.editable.of(false));
     if (options.onChange) {
       extensions.push(EditorView.updateListener.of((update) => {
         if (update.docChanged) options.onChange(update.state.doc.toString(), update);
@@ -3062,8 +3084,8 @@
     return null;
   }
 
-  function mount(input, target) {
-    return new InterviewHarnessApp(normalizeConfig(input, target));
+  function mount(input) {
+    return new InterviewHarnessApp(normalizeConfig(input));
   }
 
   function injectStyles() {
@@ -3152,7 +3174,7 @@
   function answerOptions(questionDef, answer) {
     const options = asArray(questionDef.options).map((entry) => Object.assign({ custom: false }, entry));
     if (!answer || !answer.added) return options;
-    return options.concat(normalizeAddedOptions(answer.added).map((entry) => Object.assign({ body: "", tags: null, custom: true }, entry)));
+    return options.concat(normalizeAddedOptions(answer.added).map((entry) => Object.assign({ markdown: "", markdownTooltip: "", htmlPreview: "", previewType: "none", tags: [], custom: true }, entry)));
   }
 
   function optionComment(answer, optionId) {
@@ -3194,8 +3216,8 @@
     return `${base}-${index}`;
   }
 
-  function flowPairKey(from, to) {
-    return JSON.stringify([String(from || ""), String(to || "")].sort());
+  function flowConnectionKey(from, to) {
+    return JSON.stringify([String(from || ""), String(to || "")]);
   }
 
   function flowNodeByName(answer, name) {
@@ -3203,7 +3225,7 @@
   }
 
   function flowConnectionByKey(answer, key) {
-    return asArray(answer && answer.connections).find((connection) => flowPairKey(connection.from, connection.to) === key) || null;
+    return asArray(answer && answer.connections).find((connection) => flowConnectionKey(connection.from, connection.to) === key) || null;
   }
 
   function normalizeFlowSelection(input, answer) {
@@ -3359,11 +3381,18 @@
     return record;
   }
 
-  function flowVisConnectionRecord(connection) {
+  function flowReciprocalConnection(connections, connection) {
+    return asArray(connections).find((candidate) => candidate !== connection && candidate.from === connection.to && candidate.to === connection.from) || null;
+  }
+
+  function flowVisConnectionRecord(connection, connections) {
     const comment = String(connection.comment || "");
     const highlighted = Boolean(comment.trim());
+    const smooth = flowReciprocalConnection(connections, connection)
+      ? { enabled: true, type: "curvedCW", roundness: 0.12 }
+      : { enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 };
     return {
-      id: flowPairKey(connection.from, connection.to),
+      id: flowConnectionKey(connection.from, connection.to),
       from: connection.from,
       to: connection.to,
       label: connection.label || "",
@@ -3377,7 +3406,7 @@
       },
       width: 1.7,
       dashes: false,
-      smooth: { enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 }
+      smooth
     };
   }
 
@@ -3391,6 +3420,43 @@
 
   function objectFrom(options, value) {
     return Object.fromEntries(options.map((entry) => [entry.id, value === "title" ? entry.title : value]));
+  }
+
+  function requireObject(value, path) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${path} must be an object.`);
+    return Object.assign({}, value);
+  }
+
+  function requireArray(value, path, nonEmpty) {
+    if (!Array.isArray(value)) throw new TypeError(`${path} must be an array.`);
+    if (nonEmpty && value.length === 0) throw new TypeError(`${path} must not be empty.`);
+    return value;
+  }
+
+  function requiredString(value, path) {
+    if (typeof value !== "string" || !value.trim()) throw new TypeError(`${path} must be a non-empty string.`);
+    return value.trim();
+  }
+
+  function optionalString(value, path) {
+    if (value === undefined || value === null) return "";
+    if (typeof value !== "string") throw new TypeError(`${path} must be a string.`);
+    return value;
+  }
+
+  function assertKnownFields(value, allowed, path) {
+    const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+    if (unknown.length) throw new TypeError(`${path} contains unknown ${unknown.length === 1 ? "field" : "fields"}: ${unknown.join(", ")}.`);
+  }
+
+  function configFingerprint(value) {
+    const source = JSON.stringify(value);
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `v4-${(hash >>> 0).toString(36)}`;
   }
 
   function asArray(value) {
@@ -3468,15 +3534,6 @@
     }
   }
 
-  function richPlainText(value) {
-    if (value === undefined || value === null || value === "") return "";
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-    if (Array.isArray(value)) return value.map(richPlainText).filter(Boolean).join(" ");
-    if (value.markup !== undefined) return String(value.markup).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    if (value.value !== undefined) return valueToText(value.value);
-    return valueToText(value);
-  }
-
   function escapeHTML(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -3492,16 +3549,6 @@
 
   global.InterviewHarness = {
     version: VERSION,
-    mount,
-    choice,
-    evaluation,
-    bucket,
-    flow,
-    edit,
-    option,
-    feature,
-    frame,
-    html,
-    code
+    mount
   };
 })(window);

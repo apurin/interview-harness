@@ -4,7 +4,7 @@
 
 ![Interview Harness showing layout choices, contextual comments, technology comparison, release planning, and flow editing](assets/interview-harness-demo.gif)
 
-Interview Harness turns important clarifying questions into one focused, visual session. An agent generates a local HTML file with concrete options, comparisons, plans, flows, and editable drafts; the user responds once, and the agent gets a concise answer summary.
+Interview Harness turns important clarifying questions into one visual session. An agent generates a local HTML file with concrete options, comparisons, plans, flows, and editable drafts; the user responds once, and the agent gets a concise answer summary.
 
 There is no app to deploy, build step to run, or server to keep alive. The user opens the generated file directly in a browser.
 
@@ -29,33 +29,27 @@ The skill teaches an agent when an interview is worthwhile, which questions belo
 ## Author One Directly
 
 ```html
-<div id="interview-harness"></div>
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/interview-harness.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@4/interview-harness.js"></script>
 <script>
-  const h = InterviewHarness;
-
-  h.mount({
+  InterviewHarness.mount({
     title: "Shape the beta",
-    intro: "Resolve the product direction before implementation continues.",
+    markdownIntro: "Resolve the **product direction** before implementation continues.",
     questions: [
-      h.choice({
-        id: "direction",
+      {
+        type: "choice",
         prompt: "Which experience should anchor the beta?",
-        select: "one",
-        options: [
-          h.option({
-            id: "command-center",
+        cards: [
+          {
             title: "Command center",
             tags: ["Recommended"],
-            body: "A dense operational workspace for experienced teams."
-          }),
-          h.option({
-            id: "guided-inbox",
+            markdown: "A dense operational workspace for **experienced teams**."
+          },
+          {
             title: "Guided inbox",
-            body: "A prioritized daily workflow with faster onboarding."
-          })
+            markdown: "A prioritized daily workflow with faster onboarding."
+          }
         ]
-      })
+      }
     ]
   });
 </script>
@@ -65,15 +59,15 @@ Save the file and open it directly in a browser. No hosting is required.
 
 ## Question Types
 
-| Helper | Collects |
+| Type | Collects |
 | --- | --- |
 | `choice` | One or several selections from plain or rich options |
-| `evaluation` | One decision across a shared comparison matrix |
-| `bucket` | A categorized scope or plan |
+| `compare` | One decision across a shared comparison matrix |
+| `categorize` | A categorized scope or plan |
 | `flow` | Corrections to a directed process or journey |
 | `edit` | Changes to a text or code artifact |
 
-Rich options can combine HTML, iframe previews, and highlighted code. The library supplies the responsive layout, navigation, progress, comments, editing, state, and text export.
+Cards accept Markdown, Markdown tooltips, tags, and inline or file-based HTML previews. The library supplies the responsive layout, navigation, progress, comments, editing, state, and text export.
 
 <details>
 <summary>Maintaining the project</summary>

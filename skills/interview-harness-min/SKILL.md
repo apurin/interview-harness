@@ -1,74 +1,37 @@
 ---
 name: interview-harness-min
-description: Create concise, sharable HTML interviews that collect user decisions with Interview Harness question helpers.
+description: Create a local visual interview that collects user decisions with Interview Harness.
 ---
 
-Create one sharable HTML file with an interactive interview that the user can open directly in a browser. Load `interview-harness.js` from the major-pinned jsDelivr URL. Do not inline, copy, or read `interview-harness.js`; this skill is the authoring reference.
+Create one local HTML interview. Load `https://cdn.jsdelivr.net/gh/apurin/interview-harness@4/interview-harness.js`; do not read or copy the library source. Present the saved file path—the user opens it directly, so do not start a server.
 
-If the user asks to install the skill locally, suggest `npx skills add apurin/interview-harness --list` to review available interview-harness skills.
+Use an interview only for unknown, user-owned, material decisions. Include every currently answerable question that would change the work. Prefer concrete options over blank prompts, use one question per decision area, and do not ask merely because an interaction is available. Users can comment on any card or structured part, including unselected options.
 
 ```html
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>Interview title</title>
-  </head>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Interview</title></head>
   <body>
-    <div id="interview-harness"></div>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@3/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@4/interview-harness.js"></script>
     <script>
-      const h = InterviewHarness;
-
-      h.mount({ title: "Interview title", intro: "Short context.", questions: [] });
+      InterviewHarness.mount({
+        title: "Interview",
+        markdownIntro: "Short context.",
+        questions: [{ type: "choice", prompt: "Which direction?", cards: [{ title: "A" }, { title: "B" }] }]
+      });
     </script>
   </body>
 </html>
 ```
 
-All helpers take one object argument and use the documented field names.
+The harness creates the container, IDs, layout, state, comments, and export.
 
-Present the file to the user, then wait for the answer they return.
+Cards use `{ title, markdown?, markdownTooltip?, htmlPreview?, tags? }`. Put the main description in `markdown`; reserve `markdownTooltip` for secondary context. Both Markdown fields and comparison text accept Markdown. `htmlPreview` is raw HTML or `"file:./preview.html"`; layout is automatic.
 
-## Mount
+- `{ type: "choice", prompt, multiple?, cards }`
+- `{ type: "compare", prompt, cards, criteria }`, where each criterion is `{ title, group?, markdownTooltip?, values }`. Values align positionally with cards and are Markdown strings or `{ markdown?, status?, markdownTooltip? }`. Status: `yes`, `no`, `partial`, `unknown`, `warning`, `best`.
+- `{ type: "categorize", prompt, categories, cards }`, where categories are strings.
+- `{ type: "flow", prompt, connections }`, where connections are `{ from, to, label? }`.
+- `{ type: "edit", prompt, value, language? }`.
 
-- `title`: string.
-- `intro`: string shown under the title.
-- `questions`: array of question helpers.
-
-Put rich helpers in option `body` values or `h.edit` artifacts.
-
-## Question Helpers
-
-- `h.choice({ id, prompt, select, options, cardsPerRow })`: one or many selection; `select` is `"one"` or `"many"`.
-- `h.evaluation({ id, prompt, options, rows })`: select one option column while comparing feature rows. Rows use `h.feature({ id, title, body, group, cells })`. `cells` maps option ids to `"yes"`, `"no"`, `"partial"`, `"unknown"`, `"warn"`, `"best"`, text, or `{ icon, text, detail }`.
-- `h.bucket({ id, prompt, buckets, options })`: drag options into named buckets.
-- `h.flow({ id, prompt, connections })`: review and correct a directed flow. Connections use `{ from, to, label? }`; node names are inferred.
-- `h.edit({ id, prompt, artifact, language })`: edit a short code or text artifact; use `h.code({ lang, value })` for the artifact.
-
-`cardsPerRow` is only for `choice`: use `"auto"` or omit it for automatic card width, `1` for wide previews, `2` for side-by-side comparisons, `3` for normal rich cards, and `4` for compact scans.
-
-## Content Helpers
-
-- Plain strings are valid options.
-- `h.option({ id, title, body, tags })`: rich option. `tags` is an array of short labels.
-- `body`: one rich helper or an array of helpers and strings.
-- `h.html({ markup })`: trusted inline HTML.
-- `h.frame({ src, srcdoc, title, fileName, height })`: iframe preview; use `srcdoc` for inline frames.
-- `h.code({ lang, value })`: highlighted code block.
-
-## Composition Rules
-
-Treat helpers as alternatives, not a checklist.
-
-Identify the decision areas before writing questions. A decision area is a distinct choice, correction, or validation that changes the next work. Choose one primary helper for each decision area.
-
-Single-theme comparisons often need one question. Multi-theme briefs may need several questions when each covers a different area.
-
-Do not ask the same decision through multiple helpers. For example, avoid pairing an option comparison with a separate shortlist edit and final choice when the comparison already captures those signals.
-
-For option comparisons, prefer one `h.evaluation` with clear rows, option bodies, and tags. The evaluation can be the whole artifact for that decision area.
-
-Use `bucket` only when categorized output is needed. Use `flow` only when the corrected flow is the deliverable; omit empty connection labels. Use `edit` only when the edited text or code is the deliverable.
-
-Keep background material out of the interview by default. Include only context that is essential for the user to answer the questions. Put sources, reading material, extended reasoning, and static notes in the final response or another artifact. Do not create a question only to display them or a visualization.
+Mark a clear recommendation with `tags: ["Recommended"]`. Keep only response-critical context in the interview.

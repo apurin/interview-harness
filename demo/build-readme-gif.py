@@ -38,10 +38,10 @@ CAPTIONS = [
     ),
 ]
 
-# Captures use a 1800x1000 viewport. This removes the harness header and side
+# Captures use a 1280x720 viewport. This removes the harness header and side
 # margins while retaining the question, interaction, and relevant footer area.
-CROP = (160, 120, 1640, 920)
-OUTPUT_SIZE = (1280, 692)
+CROP = (0, 120, 1280, 720)
+OUTPUT_SIZE = (1280, 600)
 TRANSITION_STEPS = 3
 TRANSITION_MS = 70
 PRESENTATION_DURATIONS = [100, 100, 110, 1390, 1390, 1390, 1390]
@@ -51,7 +51,10 @@ PRESERVED_COLORS = [
     (235, 185, 90),
     (215, 183, 126),
     (104, 210, 170),
-    (163, 212, 123),
+    (73, 173, 134),
+    (248, 250, 251),
+    (238, 242, 243),
+    (32, 40, 45),
     (235, 240, 242),
     (20, 27, 32),
 ]
@@ -84,8 +87,8 @@ def load_frames():
     for name in FRAME_FILES:
         path = FRAME_DIR / name
         image = Image.open(path).convert("RGB")
-        if image.size != (1800, 1000):
-            raise ValueError(f"{path} is {image.size}; expected 1800x1000")
+        if image.size != (1280, 720):
+            raise ValueError(f"{path} is {image.size}; expected 1280x720")
         frames.append(image.crop(CROP).resize(OUTPUT_SIZE, Image.Resampling.LANCZOS))
     return frames
 
@@ -98,9 +101,9 @@ def add_caption(image, caption, alpha, slide):
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     left = 48
-    top = 513 + round(slide)
+    top = 421 + round(slide)
     right = 713
-    bottom = 652 + round(slide)
+    bottom = 580 + round(slide)
     opacity = round(alpha * 255)
 
     draw.rounded_rectangle(
