@@ -285,7 +285,7 @@
 
   function createInitialState(config) {
     const answers = Object.fromEntries(config.questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
-    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", commentEditor: null, detailPopover: null, answers };
+    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, commentEditor: null, detailPopover: null, answers };
   }
 
   function initialAnswer(questionDef) {
@@ -298,6 +298,9 @@
     const next = Object.assign({}, current, {
       version: VERSION,
       viewMode: saved.viewMode === "all" || saved.viewMode === "paged" ? saved.viewMode : current.viewMode,
+      bucketViews: Object.fromEntries(questions
+        .filter((questionDef) => questionDef.type === "bucket" && safeObject(saved.bucketViews)[questionDef.id] === "table")
+        .map((questionDef) => [questionDef.id, "table"])),
       commentEditor: null,
       detailPopover: null,
       answers: Object.assign({}, current.answers)
@@ -933,6 +936,65 @@
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
+    .ih-bucket-view-toolbar { display: flex; justify-content: end; margin-bottom: 12px; }
+    .ih-bucket-view-options,
+    .ih-bucket-state-options {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 3px;
+      max-width: 100%;
+      border-radius: 999px;
+      background: var(--ih-surface-2);
+      padding: 3px;
+    }
+    .ih-app .ih-bucket-view-option,
+    .ih-app .ih-bucket-state-option {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ih-muted);
+      padding: 6px 10px;
+      font-size: 10px;
+      font-weight: 760;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .ih-app .ih-bucket-view-option { font-size: 12px; padding: 7px 12px; }
+    .ih-bucket-view-option:hover,
+    .ih-bucket-state-option:hover { color: var(--ih-ink); }
+    .ih-bucket-view-option.is-selected,
+    .ih-bucket-state-option.is-selected {
+      background: var(--ih-accent);
+      color: var(--ih-accent-ink);
+    }
+    .ih-bucket-table { display: grid; gap: 8px; }
+    .ih-bucket-table-card { display: grid; gap: 9px; }
+    .ih-bucket-table-heading {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+    }
+    .ih-bucket-table-heading .ih-tags { justify-content: end; }
+    .ih-bucket-table-card .ih-option-title { font-size: 14px; line-height: 1.25; }
+    .ih-bucket-table-controls {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .ih-bucket-state-options { width: max-content; }
+    .ih-bucket-table-actions {
+      display: inline-flex;
+      align-items: center;
+      justify-self: end;
+      gap: 6px;
+    }
+    .ih-bucket-table-content { min-width: 0; display: grid; gap: 8px; }
+    .ih-bucket-table-content .ih-rich { font-size: 12px; line-height: 1.35; }
     .ih-flow { padding: 0; overflow: hidden; }
     .ih-flow-toolbar { display: grid; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--ih-line); background: var(--ih-surface-2); }
     .ih-flow-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
@@ -1297,7 +1359,26 @@
     `;
   }
 
-  function renderBucket(questionDef, answer) {
+  function renderBucket(questionDef, answer, instance) {
+    const view = instance.bucketView(questionDef.id);
+    return `
+      ${renderBucketViewSwitch(view)}
+      ${view === "table" ? renderBucketTable(questionDef, answer) : renderBucketBoard(questionDef, answer)}
+    `;
+  }
+
+  function renderBucketViewSwitch(view) {
+    return `
+      <div class="ih-bucket-view-toolbar">
+        <div class="ih-bucket-view-options" role="group" aria-label="Bucket visualization">
+          <button class="ih-bucket-view-option ${view === "board" ? "is-selected" : ""}" type="button" data-action="set-bucket-view" data-bucket-view="board" aria-pressed="${view === "board" ? "true" : "false"}">Board</button>
+          <button class="ih-bucket-view-option ${view === "table" ? "is-selected" : ""}" type="button" data-action="set-bucket-view" data-bucket-view="table" aria-pressed="${view === "table" ? "true" : "false"}">Table</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBucketBoard(questionDef, answer) {
     const byBucket = {};
     questionDef.buckets.forEach((bucket) => { byBucket[bucket.id] = []; });
     const unset = [];
@@ -1325,6 +1406,48 @@
             </section>
           `).join("")}
         </div>
+      </div>
+    `;
+  }
+
+  function renderBucketTable(questionDef, answer) {
+    return `
+      <div class="ih-bucket-table" role="list" aria-label="Table view">
+        ${questionDef.options.map((entry) => renderBucketTableCard(questionDef, answer, entry)).join("")}
+      </div>
+    `;
+  }
+
+  function renderBucketTableCard(questionDef, answer, entry) {
+    const currentBucketId = answer.buckets && answer.buckets[entry.id] || "";
+    return `
+      <article class="ih-card ih-bucket-table-card" role="listitem" data-option-id="${escapeAttr(entry.id)}">
+        <div class="ih-bucket-table-heading">
+          <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
+          ${renderTags(entry.tags)}
+        </div>
+        <div class="ih-bucket-table-controls">
+          ${renderBucketStateOptions(questionDef, entry, currentBucketId)}
+          <div class="ih-bucket-table-actions">
+            ${renderTooltipButton(entry.title, entry.markdownTooltip)}
+            ${renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on bucket option")}
+          </div>
+        </div>
+        <div class="ih-bucket-table-content">
+          ${renderCardContent(entry)}
+        </div>
+      </article>
+    `;
+  }
+
+  function renderBucketStateOptions(questionDef, entry, currentBucketId) {
+    const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+    return `
+      <div class="ih-bucket-state-options" role="group" aria-label="Set status for ${escapeAttr(entry.title)}">
+        ${buckets.map((bucket) => {
+          const isCurrent = bucket.id === currentBucketId;
+          return `<button class="ih-bucket-state-option ${isCurrent ? "is-selected" : ""}" type="button" data-action="move-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-bucket-id="${escapeAttr(bucket.id)}" aria-pressed="${isCurrent ? "true" : "false"}">${escapeHTML(bucket.title)}</button>`;
+        }).join("")}
       </div>
     `;
   }
@@ -1751,6 +1874,10 @@
       return this.state.viewMode === "all" ? "all" : "paged";
     }
 
+    bucketView(questionId) {
+      return safeObject(this.state.bucketViews)[questionId] === "table" ? "table" : "board";
+    }
+
     currentQuestion() {
       return this.config.questions[this.state.step];
     }
@@ -1804,6 +1931,7 @@
 
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
+      if (action === "set-bucket-view") return this.setBucketView(actionEl.dataset.bucketView, context);
       if (action === "choose-option") return this.chooseOption(actionEl.dataset.optionId, context);
       if (action === "choose-evaluation-option") return this.chooseEvaluationOption(actionEl.dataset.optionId, context);
       if (action === "move-bucket-option") return this.moveBucketOption(actionEl, context);
@@ -2023,6 +2151,17 @@
       this.save();
       this.render();
       global.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    setBucketView(view, context) {
+      if (!context || context.questionDef.type !== "bucket") return;
+      this.state.bucketViews = Object.assign({}, safeObject(this.state.bucketViews));
+      if (view === "table") this.state.bucketViews[context.questionDef.id] = "table";
+      else delete this.state.bucketViews[context.questionDef.id];
+      this.state.commentEditor = null;
+      this.state.detailPopover = null;
+      this.save();
+      this.render();
     }
 
     openComment(button) {
@@ -2956,14 +3095,18 @@
       if (!questionDef || questionDef.type !== "bucket") return;
       const section = this.sectionForContext(context);
       if (!section) return;
-      section.querySelectorAll(".ih-bucket-card[data-option-id]").forEach((card) => {
+      section.querySelectorAll(".ih-bucket-card[data-option-id], .ih-bucket-table-card[data-option-id]").forEach((card) => {
         const bucketId = answer.buckets && answer.buckets[card.dataset.optionId] || "";
         const bucket = section.querySelector(`.ih-bucket[data-bucket-id="${cssEscape(bucketId)}"] .ih-bucket-list`);
-        if (bucket && card.parentElement !== bucket) bucket.appendChild(card);
+        if (card.classList.contains("ih-bucket-card") && bucket && card.parentElement !== bucket) bucket.appendChild(card);
         card.querySelectorAll("[data-action='move-bucket-option']").forEach((button) => {
           const selected = (button.dataset.bucketId || "") === bucketId;
           button.classList.toggle("is-current", selected);
-          if (selected) button.setAttribute("aria-current", "true");
+          button.classList.toggle("is-selected", selected);
+          if (button.classList.contains("ih-bucket-state-option")) {
+            button.setAttribute("aria-pressed", selected ? "true" : "false");
+            button.removeAttribute("aria-current");
+          } else if (selected) button.setAttribute("aria-current", "true");
           else button.removeAttribute("aria-current");
         });
       });
@@ -2998,8 +3141,10 @@
     reset() {
       if (!global.confirm("Reset this interview and clear saved answers?")) return;
       const viewMode = this.state.viewMode;
+      const bucketViews = this.state.bucketViews;
       this.state = createInitialState(this.config);
       this.state.viewMode = viewMode;
+      this.state.bucketViews = bucketViews;
       this.flowHistories.clear();
       if (this.config.storageKey) {
         try {
