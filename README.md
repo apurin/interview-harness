@@ -67,7 +67,7 @@ Save the file and open it directly in a browser. No hosting is required.
 | `flow` | Corrections to a directed process or journey |
 | `edit` | Changes to a text or code artifact |
 
-Cards accept Markdown, Markdown tooltips, tags, and inline or file-based HTML previews. The library supplies the responsive layout, navigation, progress, comments, editing, state, and text export.
+Cards accept Markdown, Markdown tooltips, tags, and inline or file-based HTML previews. The library supplies the responsive layout, navigation, progress, comments, editing, state, and text export. Interviews open in Light mode by default; a user’s Light/Dark choice is shared across same-origin interviews and carried between sequential local files opened in the same tab.
 
 <details>
 <summary>Maintaining the project</summary>

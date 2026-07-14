@@ -8,6 +8,8 @@
   const VERSION = "4.0.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
+  const THEME_STORAGE_KEY = "interview-harness:theme";
+  const THEME_WINDOW_NAME_PREFIX = "__IH_THEME__:";
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
   const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
   const CODEMIRROR_URL = "https://esm.sh/codemirror@6.0.2";
@@ -476,29 +478,64 @@
 
   const styles = `
     :root {
-      color-scheme: dark;
-      --ih-bg: #262b2a;
-      --ih-surface: #303735;
-      --ih-surface-2: #3d4744;
-      --ih-ink: #eef1ec;
-      --ih-muted: #b8c0ba;
-      --ih-line: #46524f;
-      --ih-line-strong: #5b6864;
-      --ih-accent: #8dd7bd;
-      --ih-accent-ink: #14231e;
-      --ih-accent-soft: rgb(141 215 189 / 28%);
-      --ih-good: #72e38f;
-      --ih-visited: #716d5e;
-      --ih-warn: #f2c14e;
-      --ih-danger: #ee9b93;
-      --ih-shadow: 0 22px 48px rgb(8 14 13 / 30%);
-      --ih-radius: 4px;
-      --ih-mark-radius: 0;
-      --ih-code-bg: #202625;
-      --ih-code-ink: #eff6f2;
+      color-scheme: light;
+      --ih-bg: #f4f7f5;
+      --ih-surface: #ffffff;
+      --ih-surface-2: #e9f0ec;
+      --ih-ink: #183027;
+      --ih-muted: #60746a;
+      --ih-line: #d5e0da;
+      --ih-line-strong: #9aada3;
+      --ih-accent: #18765a;
+      --ih-accent-ink: #f5fff9;
+      --ih-accent-soft: rgb(24 118 90 / 13%);
+      --ih-good: #267c5d;
+      --ih-visited: #a5b5ac;
+      --ih-warn: #92702a;
+      --ih-warn-soft: rgb(146 112 42 / 16%);
+      --ih-danger: #ad5753;
+      --ih-best: #18765a;
+      --ih-best-ink: #0f4635;
+      --ih-shadow: 0 14px 34px rgb(38 72 57 / 10%);
+      --ih-radius: 15px;
+      --ih-mark-radius: 14px;
+      --ih-code-bg: #f1f6f3;
+      --ih-code-ink: #183027;
+      --ih-flow-node: #ffffff;
+      --ih-flow-node-hover: #e9f0ec;
+      --ih-flow-edge: #789187;
+      --ih-flow-label-bg: #f1f6f3;
       --ih-max: 1480px;
       --ih-choice-column-width: 430px;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    html[data-ih-theme="dark"] {
+      color-scheme: dark;
+      --ih-bg: #14201b;
+      --ih-surface: #1d2b25;
+      --ih-surface-2: #293b33;
+      --ih-ink: #eff7f2;
+      --ih-muted: #a9bbb1;
+      --ih-line: #344b40;
+      --ih-line-strong: #60776c;
+      --ih-accent: #74d2ad;
+      --ih-accent-ink: #0e2a1f;
+      --ih-accent-soft: rgb(116 210 173 / 16%);
+      --ih-good: #74d2ad;
+      --ih-visited: #53665d;
+      --ih-warn: #d8b56c;
+      --ih-warn-soft: rgb(216 181 108 / 20%);
+      --ih-danger: #e5978e;
+      --ih-best: #8cdbbc;
+      --ih-best-ink: #163f31;
+      --ih-shadow: 0 18px 42px rgb(0 0 0 / 24%);
+      --ih-code-bg: #101914;
+      --ih-code-ink: #edf8f1;
+      --ih-flow-node: #293b33;
+      --ih-flow-node-hover: #344b40;
+      --ih-flow-edge: #6c8579;
+      --ih-flow-label-bg: #101914;
     }
 
     .ih-app, .ih-app * { box-sizing: border-box; }
@@ -574,7 +611,14 @@
     }
     .ih-main.is-all { display: grid; gap: 44px; padding-bottom: 58px; }
     .ih-step { min-width: 0; scroll-margin-top: 118px; }
-    .ih-question-head { margin-bottom: clamp(16px, 2.4vw, 24px); }
+    .ih-question-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: end;
+      margin-bottom: clamp(16px, 2.4vw, 24px);
+    }
+    .ih-question-head > div { min-width: 0; }
     .ih-kicker { margin: 0 0 8px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
     .ih-prompt { margin: 0; max-width: 980px; font-size: clamp(22px, 2.5vw, 34px); line-height: 1.12; letter-spacing: 0; }
     .ih-export-note { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
@@ -936,7 +980,7 @@
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
-    .ih-bucket-view-toolbar { display: flex; justify-content: end; margin-bottom: 12px; }
+    .ih-bucket-view-toolbar { display: flex; justify-content: end; align-self: end; }
     .ih-bucket-view-options,
     .ih-bucket-state-options {
       display: inline-flex;
@@ -1088,6 +1132,205 @@
     .ih-evaluation-tooltip-title { margin: 0 0 4px; color: var(--ih-accent); font-size: 11px; font-weight: 850; line-height: 1.2; }
     .ih-evaluation-tooltip-body { margin: 0; font-size: 12px; font-weight: 650; line-height: 1.42; }
 
+    /* Mint Air -------------------------------------------------------------- */
+
+    .ih-app { min-height: 100dvh; }
+    .ih-topbar {
+      border-bottom: 1px solid transparent;
+      background: var(--ih-surface);
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+    .ih-topbar-inner { padding-block: 15px; align-items: center; }
+    .ih-brand { align-items: center; }
+    .ih-mark {
+      border: 1px solid color-mix(in srgb, var(--ih-accent) 32%, var(--ih-line));
+      background: var(--ih-accent-soft);
+      color: var(--ih-accent);
+    }
+    .ih-title { font-weight: 720; letter-spacing: -.025em; }
+    .ih-actions { align-items: center; }
+    .ih-theme-switch {
+      display: inline-flex;
+      gap: 3px;
+      padding: 3px;
+      border-radius: 12px;
+      background: var(--ih-surface-2);
+    }
+    .ih-theme-option {
+      min-height: 30px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--ih-muted);
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .ih-theme-option[aria-pressed="true"] {
+      background: var(--ih-surface);
+      color: var(--ih-ink);
+      box-shadow: 0 2px 8px color-mix(in srgb, var(--ih-ink) 9%, transparent);
+    }
+    .ih-btn {
+      min-height: 36px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: var(--ih-surface);
+      box-shadow: none;
+    }
+    .ih-btn:hover {
+      border-color: var(--ih-line-strong);
+      background: var(--ih-surface-2);
+    }
+
+    .ih-timeline { padding-bottom: 13px; }
+    .ih-timeline-list { gap: 12px; counter-reset: ih-step; }
+    .ih-timeline-list::before { left: 16px; right: 16px; height: 1px; background: var(--ih-line); }
+    .ih-timeline-dot {
+      width: 28px;
+      height: 28px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: var(--ih-surface);
+      color: var(--ih-muted);
+      counter-increment: ih-step;
+    }
+    .ih-timeline-dot::after {
+      content: counter(ih-step);
+      display: grid;
+      place-items: center;
+      height: 100%;
+      font-size: 10px;
+      font-weight: 760;
+    }
+    .ih-timeline-dot.is-unanswered:not(.is-active):not(.is-partial) {
+      background: color-mix(in srgb, var(--ih-accent) 5%, var(--ih-surface-2));
+      color: var(--ih-muted);
+    }
+    .ih-timeline-dot.is-partial {
+      border-color: var(--ih-visited);
+      background: var(--ih-surface);
+      color: var(--ih-visited);
+    }
+    .ih-timeline-dot.is-answered:not(.is-active) {
+      border-color: var(--ih-good);
+      background: var(--ih-surface);
+      color: var(--ih-good);
+    }
+    .ih-timeline-dot.is-export::after { content: "✓"; font-size: 13px; font-weight: 750; }
+    .ih-timeline-dot.is-export.is-waiting:not(.is-active),
+    .ih-timeline-dot.is-export.is-ready:not(.is-active) {
+      border-color: transparent;
+      background: color-mix(in srgb, var(--ih-accent) 5%, var(--ih-surface-2));
+      color: var(--ih-muted);
+    }
+    .ih-timeline-dot.is-active,
+    .ih-timeline-dot.is-export.is-active {
+      border-color: var(--ih-accent);
+      background: var(--ih-accent);
+      color: var(--ih-accent-ink);
+      box-shadow: none;
+      transform: scale(1.06);
+    }
+
+    .ih-main { padding-top: clamp(28px, 4vw, 52px); }
+    .ih-kicker { color: var(--ih-muted); letter-spacing: .04em; text-transform: none; }
+    .ih-prompt { max-width: 960px; font-size: clamp(26px, 2.8vw, 38px); letter-spacing: -.035em; }
+    .ih-grid { column-width: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .ih-grid > .ih-card { height: 100%; margin: 0; }
+    .ih-card {
+      border: 1px solid transparent;
+      background: var(--ih-surface);
+      box-shadow: 0 7px 22px rgb(38 72 57 / 7%);
+    }
+    html[data-ih-theme="dark"] .ih-card { box-shadow: 0 8px 26px rgb(0 0 0 / 16%); }
+    .ih-choice { min-height: 210px; transition: border-color .14s ease, box-shadow .14s ease, background .14s ease; }
+    .ih-choice:hover { border-color: var(--ih-line-strong); box-shadow: var(--ih-shadow); }
+    .ih-choice.is-selected,
+    .ih-choice.is-selected:hover {
+      border: 1px solid var(--ih-accent);
+      background: color-mix(in srgb, var(--ih-accent) 6%, var(--ih-surface));
+      box-shadow: 0 0 0 2px var(--ih-accent-soft);
+    }
+    .ih-option-title { font-size: clamp(18px, 1.45vw, 22px); letter-spacing: -.025em; }
+    .ih-pill { border-radius: 999px; background: var(--ih-surface-2); color: var(--ih-muted); }
+    .ih-icon-btn,
+    .ih-comment-button,
+    .ih-move-button,
+    .ih-remove-icon { border-radius: 999px; }
+    .ih-bottom {
+      border-top: 1px solid transparent;
+      background: var(--ih-surface);
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+
+    .ih-evaluation-board { background: color-mix(in srgb, var(--ih-surface) 88%, var(--ih-bg)); }
+    .ih-evaluation-head { border-bottom-color: var(--ih-line); }
+    .ih-evaluation-table th,
+    .ih-evaluation-table td {
+      border-bottom-color: color-mix(in srgb, var(--ih-line) 78%, transparent);
+      border-right-color: color-mix(in srgb, var(--ih-line) 62%, transparent);
+    }
+    .ih-evaluation-table thead th.is-selected {
+      background: color-mix(in srgb, var(--ih-accent) 7%, var(--ih-surface));
+      color: var(--ih-ink);
+      box-shadow:
+        inset 1px 0 0 var(--ih-accent),
+        inset -1px 0 0 var(--ih-accent),
+        inset 0 1px 0 var(--ih-accent),
+        0 0 12px var(--ih-accent-soft);
+    }
+    .ih-evaluation-table td.is-selected {
+      background: color-mix(in srgb, var(--ih-accent) 4%, transparent);
+      box-shadow: inset 1px 0 0 var(--ih-accent), inset -1px 0 0 var(--ih-accent);
+    }
+    .ih-evaluation-table tbody tr:last-child td.is-selected {
+      box-shadow:
+        inset 1px 0 0 var(--ih-accent),
+        inset -1px 0 0 var(--ih-accent),
+        inset 0 -1px 0 var(--ih-accent);
+    }
+    .ih-evaluation-cell[data-icon="yes"] { color: var(--ih-good); }
+    .ih-evaluation-cell[data-icon="no"] { color: var(--ih-danger); }
+    .ih-evaluation-cell[data-icon="partial"],
+    .ih-evaluation-cell[data-icon="unknown"] { color: var(--ih-muted); }
+    .ih-evaluation-cell[data-icon="warn"] { color: var(--ih-warn); }
+    .ih-evaluation-cell[data-icon="best"] { color: var(--ih-best); font-weight: 850; }
+    .ih-evaluation-cell[data-icon="best"] svg {
+      fill: var(--ih-best);
+      stroke: var(--ih-best-ink);
+      stroke-width: 1.1;
+    }
+
+    .ih-flow,
+    .ih-flow-toolbar,
+    .ih-flow-selection { background: var(--ih-surface); }
+    .ih-flow-canvas {
+      background:
+        linear-gradient(color-mix(in srgb, var(--ih-line) 52%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--ih-line) 52%, transparent) 1px, transparent 1px),
+        var(--ih-code-bg);
+      background-size: 24px 24px;
+    }
+    .ih-flow-selected-value { background: var(--ih-surface-2); color: var(--ih-ink); }
+    .ih-code-editor-host,
+    .ih-code-fallback,
+    .ih-output {
+      border: 1px solid var(--ih-line);
+      background: var(--ih-code-bg);
+      color: var(--ih-code-ink);
+    }
+    .ih-code-editor-host .cm-editor { background: var(--ih-code-bg); color: var(--ih-code-ink); }
+    .ih-code-editor-host .cm-gutters {
+      border-right-color: var(--ih-line);
+      background: var(--ih-surface-2);
+      color: var(--ih-muted);
+    }
+    .ih-code-editor-host .cm-activeLine,
+    .ih-code-editor-host .cm-activeLineGutter { background: var(--ih-accent-soft); }
+
     @media (max-width: 900px) {
       .ih-topbar-inner { grid-template-columns: 1fr; }
       .ih-actions { justify-content: start; }
@@ -1097,6 +1340,10 @@
       .ih-evaluation-board { --ih-evaluation-column-width: 275px; }
       .ih-bottom-inner { align-items: stretch; }
       .ih-flow-toolbar-row { align-items: start; }
+    }
+    @media (max-width: 820px) {
+      .ih-grid { grid-template-columns: 1fr; }
+      .ih-choice { min-height: 0; }
     }
     @media (max-width: 680px) {
       .ih-grid[data-cards-per-row] { grid-template-columns: minmax(0, 1fr); }
@@ -1110,6 +1357,11 @@
     const viewMode = instance.viewMode();
     const isExport = instance.state.step >= instance.config.questions.length;
     const canToggleMode = instance.config.questions.length > 1;
+    const themeSwitch = `
+      <div class="ih-theme-switch" role="group" aria-label="Color theme">
+        <button class="ih-theme-option" type="button" data-action="set-theme" data-theme="light" aria-pressed="${instance.theme === "light" ? "true" : "false"}">Light</button>
+        <button class="ih-theme-option" type="button" data-action="set-theme" data-theme="dark" aria-pressed="${instance.theme === "dark" ? "true" : "false"}">Dark</button>
+      </div>`;
     const modeToggle = canToggleMode
       ? `<button class="ih-btn ih-mode-toggle" type="button" data-action="toggle-mode">${viewMode === "all" ? "One per page" : "All questions"}</button>`
       : "";
@@ -1118,7 +1370,7 @@
       : isExport ? renderExportStep(instance) : renderQuestionStep(instance, instance.config.questions[instance.state.step], instance.state.step);
 
     instance.root.innerHTML = `
-      <div class="ih-app">
+      <div class="ih-app" data-ih-theme="${escapeAttr(instance.theme)}">
         <header class="ih-topbar">
           <div class="ih-topbar-inner">
             <div class="ih-brand">
@@ -1129,6 +1381,7 @@
               </div>
             </div>
             <div class="ih-actions">
+              ${themeSwitch}
               ${modeToggle}
               <button class="ih-btn" type="button" data-action="reset">Reset</button>
             </div>
@@ -1180,6 +1433,9 @@
   }
 
   function renderQuestionStep(instance, questionDef, index) {
+    const bucketViewSwitch = questionDef.type === "bucket"
+      ? renderBucketViewSwitch(instance.bucketView(questionDef.id))
+      : "";
     return `
       <section class="ih-step" id="ih-question-${index}" data-question-id="${escapeAttr(questionDef.id)}" data-question-index="${index}">
         <div class="ih-question-head">
@@ -1187,6 +1443,7 @@
             <p class="ih-kicker">Question ${index + 1} / ${instance.config.questions.length}</p>
             <h2 class="ih-prompt">${escapeHTML(questionDef.prompt)}</h2>
           </div>
+          ${bucketViewSwitch}
         </div>
         ${renderQuestionBody(questionDef, instance.state.answers[questionDef.id], instance)}
       </section>
@@ -1361,10 +1618,7 @@
 
   function renderBucket(questionDef, answer, instance) {
     const view = instance.bucketView(questionDef.id);
-    return `
-      ${renderBucketViewSwitch(view)}
-      ${view === "table" ? renderBucketTable(questionDef, answer) : renderBucketBoard(questionDef, answer)}
-    `;
+    return view === "table" ? renderBucketTable(questionDef, answer) : renderBucketBoard(questionDef, answer);
   }
 
   function renderBucketViewSwitch(view) {
@@ -1806,6 +2060,7 @@
       this.root = resolveTarget(config.target);
       this.state = createInitialState(config);
       this.state.viewMode = initialViewMode(config.questions);
+      this.theme = readSharedTheme();
       this.saveTimer = null;
       this.chromeFrame = null;
       this.sortables = [];
@@ -1818,6 +2073,10 @@
       this.exportTimer = null;
       this.toastTimer = null;
       this.onDocumentKeydown = (event) => this.onKeydown(event);
+      this.onThemeStorage = (event) => {
+        if (event.key !== THEME_STORAGE_KEY) return;
+        this.setTheme(readSharedTheme(), false);
+      };
       this.load();
       this.mount();
       ensureMarked().then(() => {
@@ -1826,6 +2085,7 @@
     }
 
     mount() {
+      applyThemeToDocument(this.theme);
       injectStyles();
       this.render();
       this.root.addEventListener("click", (event) => this.onClick(event));
@@ -1833,6 +2093,7 @@
       this.root.addEventListener("change", (event) => this.onInput(event));
       this.root.addEventListener("focusout", (event) => this.onFocusout(event));
       global.document.addEventListener("keydown", this.onDocumentKeydown);
+      global.addEventListener("storage", this.onThemeStorage);
       this.root.addEventListener("mouseover", (event) => this.onMouseover(event));
       this.root.addEventListener("mousemove", (event) => this.onMousemove(event));
       this.root.addEventListener("mouseout", (event) => this.onMouseout(event));
@@ -1878,6 +2139,15 @@
       return safeObject(this.state.bucketViews)[questionId] === "table" ? "table" : "board";
     }
 
+    setTheme(theme, persist = true) {
+      const nextTheme = normalizeTheme(theme) || "light";
+      const changed = nextTheme !== this.theme;
+      this.theme = nextTheme;
+      applyThemeToDocument(nextTheme);
+      if (persist) persistSharedTheme(nextTheme);
+      if (changed && this.root.isConnected) this.render();
+    }
+
     currentQuestion() {
       return this.config.questions[this.state.step];
     }
@@ -1918,6 +2188,7 @@
       if (action === "back") return this.go(-1);
       if (action === "next") return this.go(1);
       if (action === "reset") return this.reset();
+      if (action === "set-theme") return this.setTheme(actionEl.dataset.theme);
       if (action === "toggle-mode") return this.toggleMode();
       if (action === "copy-text") return this.copyText();
       if (action === "jump") return this.jump(numberOr(actionEl.dataset.step, this.state.step));
@@ -2388,21 +2659,22 @@
           if (!answer.positions[node.name]) answer.positions[node.name] = fallbackPositions[node.name];
         });
       }
-      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name])));
+      const flowTheme = flowVisualTheme(host);
+      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name], flowTheme)));
       const flowConnections = normalizeFlowConnections(answer.connections, false);
-      const edges = new vis.DataSet(flowConnections.map((connection) => flowVisConnectionRecord(connection, flowConnections)));
+      const edges = new vis.DataSet(flowConnections.map((connection) => flowVisConnectionRecord(connection, flowConnections, flowTheme)));
       const network = new vis.Network(host, { nodes, edges }, {
         autoResize: true,
         nodes: {
           shape: "box",
           margin: { top: 12, right: 15, bottom: 12, left: 15 },
           widthConstraint: { minimum: 126, maximum: 190 },
-          font: { color: "#eef1ec", size: 13, face: "Inter, system-ui, sans-serif", multi: false },
+          font: { color: flowTheme.ink, size: 13, face: "Inter, system-ui, sans-serif", multi: false },
           shapeProperties: { borderRadius: 4 },
           chosen: { node: true, label: false }
         },
         edges: {
-          font: { color: "#dfe8e3", size: 11, face: "Inter, system-ui, sans-serif", background: "#202625", strokeWidth: 0, align: "horizontal" },
+          font: { color: flowTheme.muted, size: 11, face: "Inter, system-ui, sans-serif", background: flowTheme.labelBackground, strokeWidth: 0, align: "horizontal" },
           selectionWidth: 2.4,
           hoverWidth: 1.5,
           chosen: { edge: true, label: false }
@@ -2452,10 +2724,10 @@
             const connection = { from, to };
             answer.connections.push(connection);
             const reciprocal = flowReciprocalConnection(answer.connections, connection);
-            if (reciprocal) edges.update(flowVisConnectionRecord(reciprocal, answer.connections));
+            if (reciprocal) edges.update(flowVisConnectionRecord(reciprocal, answer.connections, flowTheme));
             answer.adding = false;
             answer.selected = { kind: "connection", key };
-            callback(flowVisConnectionRecord(connection, answer.connections));
+            callback(flowVisConnectionRecord(connection, answer.connections, flowTheme));
             this.activateContext(context);
             this.markChanged(answer);
             setTimeout(() => {
@@ -2470,7 +2742,7 @@
           controlNodeStyle: {
             shape: "dot",
             size: 7,
-            color: { background: "#8dd7bd", border: "#14231e" },
+            color: { background: flowTheme.accent, border: flowTheme.accentInk },
             borderWidth: 2
           }
         }
@@ -3268,10 +3540,12 @@
   async function createCodeMirrorView(host, options) {
     const { EditorView, basicSetup, theme, language } = await loadCodeMirror(options.lang || "");
     if (!host.isConnected) return null;
+    const colorScheme = global.getComputedStyle ? global.getComputedStyle(host).colorScheme : "dark";
+    const editorTheme = /\bdark\b/.test(colorScheme) || !/\blight\b/.test(colorScheme) ? theme : null;
     host.textContent = "";
     return new EditorView({
       doc: options.doc || "",
-      extensions: codeMirrorExtensions(EditorView, basicSetup, theme, language, options),
+      extensions: codeMirrorExtensions(EditorView, basicSetup, editorTheme, language, options),
       parent: host
     });
   }
@@ -3591,7 +3865,27 @@
     return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\s*\n\s*/g, " ");
   }
 
-  function flowVisNodeRecord(node, position) {
+  function flowVisualTheme(host) {
+    const styles = host && global.getComputedStyle
+      ? global.getComputedStyle(host.closest(".ih-app") || host)
+      : null;
+    const value = (name, fallback) => styles && styles.getPropertyValue(name).trim() || fallback;
+    return {
+      ink: value("--ih-ink", "#eef1ec"),
+      muted: value("--ih-muted", "#dfe8e3"),
+      accent: value("--ih-accent", "#8dd7bd"),
+      accentInk: value("--ih-accent-ink", "#14231e"),
+      warn: value("--ih-warn", "#f2c14e"),
+      warnSoft: value("--ih-warn-soft", "rgba(242,193,78,.3)"),
+      node: value("--ih-flow-node", "#3d4744"),
+      nodeHover: value("--ih-flow-node-hover", "#46524f"),
+      edge: value("--ih-flow-edge", "#71817b"),
+      labelBackground: value("--ih-flow-label-bg", "#202625")
+    };
+  }
+
+  function flowVisNodeRecord(node, position, theme) {
+    const colors = theme || flowVisualTheme(null);
     const comment = String(node.comment || "");
     const highlighted = Boolean(comment.trim());
     const record = {
@@ -3600,13 +3894,13 @@
       comment,
       shape: "box",
       color: {
-        background: "#3d4744",
-        border: highlighted ? "#f2c14e" : "#71817b",
-        highlight: { background: "#46524f", border: "#8dd7bd" },
-        hover: { background: "#46524f", border: "#8dd7bd" }
+        background: colors.node,
+        border: highlighted ? colors.warn : colors.edge,
+        highlight: { background: colors.nodeHover, border: colors.accent },
+        hover: { background: colors.nodeHover, border: colors.accent }
       },
       borderWidth: highlighted ? 3 : 1.5,
-      shadow: highlighted ? { enabled: true, color: "rgba(242,193,78,.3)", size: 16, x: 0, y: 0 } : false
+      shadow: highlighted ? { enabled: true, color: colors.warnSoft, size: 16, x: 0, y: 0 } : false
     };
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
       record.x = position.x;
@@ -3619,7 +3913,8 @@
     return asArray(connections).find((candidate) => candidate !== connection && candidate.from === connection.to && candidate.to === connection.from) || null;
   }
 
-  function flowVisConnectionRecord(connection, connections) {
+  function flowVisConnectionRecord(connection, connections, theme) {
+    const colors = theme || flowVisualTheme(null);
     const comment = String(connection.comment || "");
     const highlighted = Boolean(comment.trim());
     const smooth = flowReciprocalConnection(connections, connection)
@@ -3633,9 +3928,9 @@
       comment,
       arrows: { to: { enabled: true, scaleFactor: 0.82 } },
       color: {
-        color: highlighted ? "#f2c14e" : "#71817b",
-        highlight: "#8dd7bd",
-        hover: "#8dd7bd",
+        color: highlighted ? colors.warn : colors.edge,
+        highlight: colors.accent,
+        hover: colors.accent,
         inherit: false
       },
       width: 1.7,
@@ -3750,6 +4045,66 @@
       .trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
+  }
+
+  function normalizeTheme(value) {
+    const theme = String(value || "").toLowerCase();
+    return theme === "light" || theme === "dark" ? theme : "";
+  }
+
+  function parseThemePreference(value) {
+    if (!value) return null;
+    const legacyTheme = normalizeTheme(value);
+    if (legacyTheme) return { theme: legacyTheme, updatedAt: 0 };
+    try {
+      const parsed = JSON.parse(value);
+      const theme = normalizeTheme(parsed && parsed.theme);
+      if (!theme) return null;
+      return { theme, updatedAt: Math.max(0, Number(parsed.updatedAt) || 0) };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function windowNameThemePreference() {
+    const marker = String(global.name || "")
+      .split("|")
+      .find((part) => part.startsWith(THEME_WINDOW_NAME_PREFIX));
+    if (!marker) return null;
+    const [themeValue, updatedAtValue] = marker.slice(THEME_WINDOW_NAME_PREFIX.length).split(":");
+    const theme = normalizeTheme(themeValue);
+    if (!theme) return null;
+    return { theme, updatedAt: Math.max(0, Number(updatedAtValue) || 0) };
+  }
+
+  function readSharedTheme() {
+    const preferences = [];
+    try {
+      const stored = parseThemePreference(localStorage.getItem(THEME_STORAGE_KEY));
+      if (stored) preferences.push(stored);
+    } catch (_) {}
+    const carried = windowNameThemePreference();
+    if (carried) preferences.push(carried);
+    preferences.sort((left, right) => right.updatedAt - left.updatedAt);
+    return preferences[0] ? preferences[0].theme : "light";
+  }
+
+  function persistSharedTheme(theme) {
+    const preference = { theme: normalizeTheme(theme) || "light", updatedAt: Date.now() };
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(preference));
+    } catch (_) {}
+    try {
+      const nameParts = String(global.name || "")
+        .split("|")
+        .filter((part) => part && !part.startsWith(THEME_WINDOW_NAME_PREFIX));
+      nameParts.push(`${THEME_WINDOW_NAME_PREFIX}${preference.theme}:${preference.updatedAt}`);
+      global.name = nameParts.join("|");
+    } catch (_) {}
+  }
+
+  function applyThemeToDocument(theme) {
+    document.documentElement.dataset.ihTheme = normalizeTheme(theme) || "light";
   }
 
   function defaultStorageKey(title) {
