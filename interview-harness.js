@@ -5,7 +5,7 @@
 (function attachInterviewHarness(global) {
   "use strict";
 
-  const VERSION = "4.0.0";
+  const VERSION = "4.1.0";
   const STYLE_ID = "interview-harness-styles";
   const DEFAULT_TARGET_ID = "interview-harness";
   const THEME_STORAGE_KEY = "interview-harness:theme";
