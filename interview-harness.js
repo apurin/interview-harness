@@ -217,6 +217,9 @@
       positions: {},
       selected: null,
       adding: false,
+      viewed: false,
+      confirmed: false,
+      updated: false,
       touched: false
     };
   }
@@ -267,7 +270,12 @@
       answer.positions = normalizeFlowPositions(saved.positions, answer.nodes);
       answer.selected = normalizeFlowSelection(saved.selected, answer);
       answer.adding = false;
-      answer.touched = Boolean(saved.touched || isFlowChanged(questionDef, answer));
+      answer.viewed = Boolean(saved.viewed);
+      answer.updated = saved.updated === undefined
+        ? isFlowStructurallyChanged(questionDef, answer)
+        : Boolean(saved.updated);
+      answer.confirmed = Boolean(saved.confirmed || answer.updated);
+      answer.touched = Boolean(saved.touched || answer.confirmed || isFlowChanged(questionDef, answer));
     },
     edit(questionDef, answer, saved) {
       answer.summary = String(saved.summary || "");
@@ -397,12 +405,13 @@
   function appendFlowAnswer(lines, questionDef, answer) {
     const nodes = normalizeFlowNodes(answer.nodes, answer.connections);
     const connections = normalizeFlowConnections(answer.connections, false);
-    if (isFlowStructurallyChanged(questionDef, answer)) {
+    if (answer.confirmed) {
       const connected = new Set();
       connections.forEach((connection) => {
         connected.add(connection.from);
         connected.add(connection.to);
       });
+      lines.push(answer.updated ? "Status: Updated." : "Status: Confirmed unchanged.");
       lines.push("Final flow:");
       lines.push("```plantuml");
       lines.push("@startuml");
@@ -452,7 +461,7 @@
       Object.values(safeObject(answer.buckets)).some(Boolean) ||
       optionComments(questionDef.options, answer.comments).length
     ),
-    flow: isFlowChanged,
+    flow: (questionDef, answer) => Boolean(answer.confirmed || isFlowChanged(questionDef, answer)),
     edit: (questionDef, answer) => Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary)
   };
 
@@ -475,7 +484,8 @@
       --ih-accent: #8dd7bd;
       --ih-accent-ink: #14231e;
       --ih-accent-soft: rgb(141 215 189 / 28%);
-      --ih-good: #a2d987;
+      --ih-good: #72e38f;
+      --ih-visited: #716d5e;
       --ih-warn: #f2c14e;
       --ih-danger: #ee9b93;
       --ih-shadow: 0 22px 48px rgb(8 14 13 / 30%);
@@ -549,6 +559,7 @@
       padding: 0;
     }
     .ih-timeline-dot.is-active { background: var(--ih-accent); box-shadow: 0 0 0 4px var(--ih-accent-soft); }
+    .ih-timeline-dot.is-partial { background: var(--ih-visited); }
     .ih-timeline-dot.is-answered { background: var(--ih-good); }
     .ih-timeline-dot.is-export.is-waiting { background: var(--ih-warn); }
     .ih-timeline-dot.is-export.is-ready { background: var(--ih-good); }
@@ -924,8 +935,9 @@
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
     .ih-flow { padding: 0; overflow: hidden; }
     .ih-flow-toolbar { display: grid; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--ih-line); background: var(--ih-surface-2); }
-    .ih-flow-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .ih-flow-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
     .ih-flow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .ih-flow-response-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 8px; margin-left: auto; }
     .ih-flow-danger { color: var(--ih-danger); }
     .ih-flow-danger .ih-shortcut-key { margin-left: 1px; }
     .ih-flow-history-button { width: 32px; height: 32px; background: transparent; }
@@ -1065,7 +1077,7 @@
         ${viewMode === "paged" ? `<footer class="ih-bottom">
           <div class="ih-bottom-inner">
             <button class="ih-btn" type="button" data-action="back" ${instance.state.step === 0 ? "disabled" : ""}>Back <kbd class="ih-shortcut-key">[</kbd></button>
-            <button class="ih-btn ih-btn-primary" type="button" data-action="next">${escapeHTML(nextLabel(instance))} <kbd class="ih-shortcut-key">]</kbd></button>
+            <button class="ih-btn" type="button" data-action="next">${escapeHTML(nextLabel(instance))} <kbd class="ih-shortcut-key">]</kbd></button>
           </div>
         </footer>` : ""}
         ${renderCommentPopover(instance)}
@@ -1383,7 +1395,10 @@
               <button class="ih-icon-btn ih-flow-history-button" type="button" data-action="flow-redo" aria-label="Redo" title="Redo (Shift-Command-Z)" ${history.redo.length ? "" : "disabled"}>${redoIcon()}</button>
               <button class="ih-btn" type="button" data-action="flow-arrange">Arrange</button>
             </div>
-            ${renderCommentButton("flow-comment", "", answer.comment || "", "Comment on flow")}
+            <div class="ih-flow-response-actions">
+              ${answer.confirmed ? "" : `<button class="ih-btn" type="button" data-action="flow-confirm">Confirm as is</button>`}
+              ${renderCommentButton("flow-comment", "", answer.comment || "", "Comment on flow")}
+            </div>
           </div>
           <p class="ih-flow-tip">Drag nodes to move them. Hold <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌘</span></kbd> while dragging between nodes to connect them.</p>
         </div>
@@ -1673,6 +1688,7 @@
       this.sortables = [];
       this.flowEditors = [];
       this.flowHistories = new Map();
+      this.flowViewCleanups = [];
       this.codeEditors = [];
       this.frameObjectUrls = [];
       this.evaluationScrollCleanups = [];
@@ -1796,6 +1812,7 @@
       if (action === "flow-show-add") return this.showFlowAdd(context);
       if (action === "flow-cancel-add") return this.hideFlowAdd(context);
       if (action === "flow-commit-add") return this.addFlowNode(context);
+      if (action === "flow-confirm") return this.confirmFlow(context);
       if (action === "flow-delete") return this.deleteFlowSelection(context);
       if (action === "flow-undo") return this.undoFlow(context);
       if (action === "flow-redo") return this.redoFlow(context);
@@ -2130,6 +2147,10 @@
         try { editor.network.destroy(); } catch (_) {}
       });
       this.flowEditors = [];
+      this.flowViewCleanups.forEach((cleanup) => {
+        try { cleanup(); } catch (_) {}
+      });
+      this.flowViewCleanups = [];
       this.codeEditors.forEach((view) => {
         try { view.destroy(); } catch (_) {}
       });
@@ -2366,6 +2387,7 @@
         const selected = normalizeFlowSelection(answer.selected, answer);
         if (selected && selected.kind === "node") network.selectNodes([selected.name], false);
         if (selected && selected.kind === "connection") network.selectEdges([selected.key]);
+        this.trackFlowView(host, context);
       };
       network.once("afterDrawing", () => {
         if (shouldAutoArrange) {
@@ -2384,6 +2406,52 @@
         }
         finishInitialDrawing();
       });
+    }
+
+    trackFlowView(host, context) {
+      if (!host || !context || context.questionDef.type !== "flow" || context.answer.viewed) return;
+      let visible = false;
+      let timer = null;
+      let observer = null;
+      let stopped = false;
+      const stopTimer = () => {
+        clearTimeout(timer);
+        timer = null;
+      };
+      const updateTimer = () => {
+        if (stopped || context.answer.viewed) return stopTimer();
+        if (!visible || global.document.visibilityState !== "visible") return stopTimer();
+        if (timer) return;
+        timer = setTimeout(() => {
+          timer = null;
+          if (stopped || !visible || global.document.visibilityState !== "visible") return;
+          context.answer.viewed = true;
+          cleanup();
+          this.save();
+          this.refreshChrome();
+        }, 5000);
+      };
+      const onVisibilityChange = () => updateTimer();
+      const cleanup = () => {
+        if (stopped) return;
+        stopped = true;
+        stopTimer();
+        if (observer) observer.disconnect();
+        global.document.removeEventListener("visibilitychange", onVisibilityChange);
+      };
+      global.document.addEventListener("visibilitychange", onVisibilityChange);
+      if (global.IntersectionObserver) {
+        observer = new global.IntersectionObserver((entries) => {
+          const entry = entries[entries.length - 1];
+          visible = Boolean(entry && entry.isIntersecting && entry.intersectionRatio >= 0.5);
+          updateTimer();
+        }, { threshold: [0, 0.5] });
+        observer.observe(host);
+      } else {
+        visible = true;
+        updateTimer();
+      }
+      this.flowViewCleanups.push(cleanup);
     }
 
     flowEditorFor(questionId) {
@@ -2433,12 +2501,15 @@
       this.refreshFlowToolbar(context);
     }
 
-    recordFlowHistory(context) {
+    recordFlowHistory(context, kind) {
       if (!context || context.questionDef.type !== "flow") return;
       this.finishFlowHistoryTransaction(context);
       const history = this.flowHistoryFor(context.questionDef.id);
       this.pushFlowUndoSnapshot(history, flowHistorySnapshot(context.answer));
       history.redo = [];
+      context.answer.confirmed = true;
+      if (kind !== "confirm") context.answer.updated = true;
+      context.answer.touched = true;
       this.refreshFlowToolbar(context);
     }
 
@@ -2451,7 +2522,9 @@
       answer.positions = normalizeFlowPositions(positions, answer.nodes);
       answer.selected = null;
       answer.adding = false;
-      answer.touched = isFlowChanged(context.questionDef, answer);
+      answer.confirmed = Boolean(snapshot.confirmed);
+      answer.updated = Boolean(snapshot.updated);
+      answer.touched = Boolean(answer.confirmed || isFlowChanged(context.questionDef, answer));
     }
 
     undoFlow(context) {
@@ -2515,6 +2588,16 @@
       const redo = section.querySelector("[data-action='flow-redo']");
       if (undo) undo.disabled = !history.undo.length;
       if (redo) redo.disabled = !history.redo.length;
+      const confirm = section.querySelector("[data-action='flow-confirm']");
+      if (confirm && context.answer.confirmed) confirm.remove();
+    }
+
+    confirmFlow(context) {
+      if (!context || context.questionDef.type !== "flow" || context.answer.confirmed) return;
+      this.recordFlowHistory(context, "confirm");
+      this.activateContext(context);
+      this.save();
+      this.render();
     }
 
     showFlowAdd(context) {
@@ -2601,6 +2684,8 @@
         if (!connection) return;
         if (value) connection.label = value;
         else delete connection.label;
+        answer.confirmed = true;
+        answer.updated = true;
         const editor = this.flowEditorFor(context.questionDef.id);
         if (editor) editor.edges.update({ id: selected.key, label: value });
         this.markChanged(answer, true);
@@ -3136,9 +3221,11 @@
 
   function timelineState(instance, questionDef, index) {
     const answer = instance.state.answers[questionDef.id];
+    const answered = isQuestionAnswered(questionDef, answer);
     return [
       index === instance.state.step ? "is-active" : "",
-      isQuestionAnswered(questionDef, answer) ? "is-answered" : "is-unanswered"
+      answered ? "is-answered" : "is-unanswered",
+      !answered && questionDef.type === "flow" && answer && answer.viewed ? "is-partial" : ""
     ].filter(Boolean).join(" ");
   }
 
@@ -3150,7 +3237,7 @@
     choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
     evaluation: (_questionDef, answer) => Boolean(answer.selected),
     bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id])),
-    flow: () => true,
+    flow: (_questionDef, answer) => Boolean(answer.confirmed),
     edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
   };
 
@@ -3264,7 +3351,9 @@
           connection.label ? { label: connection.label } : {},
           connection.comment ? { comment: connection.comment } : {}
         )),
-      comment: String(answer && answer.comment || "")
+      comment: String(answer && answer.comment || ""),
+      confirmed: Boolean(answer && answer.confirmed),
+      updated: Boolean(answer && answer.updated)
     };
   }
 
