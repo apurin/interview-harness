@@ -11,7 +11,7 @@ OUTPUT = ROOT / "assets" / "interview-harness-demo.gif"
 FRAME_FILES = [
     "01-layout-decision.png",
     "02-technology-decision.png",
-    "03-release-board.png",
+    "03-release-table.png",
     "04-customer-flow.png",
 ]
 
@@ -27,9 +27,9 @@ CAPTIONS = [
         "Comment on any option or criterion wherever nuance matters.",
     ),
     (
-        "SHAPE SCOPE VISUALLY",
-        "Organize the plan in one pass",
-        "Sort, defer, or leave decisions open without writing a brief.",
+        "REVIEW SCOPE YOUR WAY",
+        "Switch between board and table",
+        "Filter the full plan by release bucket without losing context.",
     ),
     (
         "CORRECT THE AGENT’S MODEL",
@@ -109,19 +109,19 @@ def add_caption(image, caption, alpha, slide):
     draw.rounded_rectangle(
         (left, top, right, bottom),
         radius=16,
-        fill=(20, 27, 32, round(opacity * 0.9)),
-        outline=(255, 255, 255, round(opacity * 0.12)),
+        fill=(248, 253, 250, round(opacity * 0.95)),
+        outline=(165, 207, 187, round(opacity * 0.62)),
         width=1,
     )
     draw.rounded_rectangle(
         (left + 18, top + 22, left + 22, bottom - 22),
         radius=2,
-        fill=(104, 210, 170, opacity),
+        fill=(58, 143, 105, opacity),
     )
     text_left = left + 40
-    draw.text((text_left, top + 19), kicker, font=KICKER_FONT, fill=(123, 225, 187, opacity))
-    draw.text((text_left, top + 42), title, font=TITLE_FONT, fill=(255, 255, 255, opacity))
-    draw.text((text_left, top + 88), body, font=BODY_FONT, fill=(221, 227, 231, opacity))
+    draw.text((text_left, top + 19), kicker, font=KICKER_FONT, fill=(43, 125, 91, opacity))
+    draw.text((text_left, top + 42), title, font=TITLE_FONT, fill=(29, 48, 40, opacity))
+    draw.text((text_left, top + 88), body, font=BODY_FONT, fill=(74, 91, 84, opacity))
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 

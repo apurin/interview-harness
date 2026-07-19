@@ -16,7 +16,7 @@ Keep generated interview pages cheap to author. Move reusable layout, behavior, 
 ## Release Policy
 
 - Release with `node scripts/release.mjs X.Y.Z`.
-- The release script sets `VERSION`, renders skills from templates, keeps shared jsDelivr URLs on the active major alias, commits release files, tags `vX.Y.Z`, pushes `main` and the tag, and refreshes jsDelivr.
+- The release script sets `VERSION`, renders skills with the exact `vX.Y.Z` jsDelivr runtime URL, commits release files, tags `vX.Y.Z`, pushes `main` and the tag, refreshes the `@latest` skill URLs, and verifies their published content.
 - Update skill templates when the public authoring surface changes; do not hand-edit generated skill files for release content.
 
 ## Output Direction

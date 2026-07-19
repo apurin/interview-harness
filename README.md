@@ -1,22 +1,34 @@
 # Interview Harness
 
-**Agents do better work when users can react to something concrete.**
+**Turn an agent’s questions into one clear visual decision session.**
+
+Interview Harness is an authoring skill and browser library for decisions that are difficult to resolve in chat. An AI agent creates a temporary local interview with concrete options, comparisons, plans, flows, or drafts; you review them in one session and return a concise record of your selections, changes, and comments.
 
 ![Interview Harness showing layout choices, contextual comments, technology comparison, release planning, and flow editing](assets/interview-harness-demo.gif)
 
-Interview Harness turns important clarifying questions into one visual session. An agent generates a local HTML file with concrete options, comparisons, plans, flows, and editable drafts; the user responds once, and the agent gets a concise answer summary.
+Concrete material is easier to evaluate than a blank prompt. It helps crystallize a user’s vision and intent before implementation begins. You can compare alternatives, correct assumptions, combine parts of different proposals, and attach comments to the exact item they concern. The agent receives a coherent decision context it can act on, preserving nuance and reducing avoidable rework.
 
-There is no app to deploy, build step to run, or server to keep alive. The user opens the generated file directly in a browser.
+Each interview is a readable HTML file opened directly in your browser. It requires no account, hosted application, deployment, or backend. Interview Harness does not upload your responses; state remains in the browser until you copy or export it.
 
-## Why Interview Harness
+Interview Harness is free and open source under the [MIT License](LICENSE). The library and authoring skills are public, readable, and unminified.
 
-- **Recognition over recall.** Users react to previews and proposals instead of describing everything from scratch.
-- **One complete session.** Agents collect every material decision they can identify before continuing the work.
-- **Nuance stays attached.** Users can comment on options—including ones they decline—and on structured parts of a question.
-- **Clean handoff.** Only selections, edits, changes, and comments appear in the exported answer.
-- **Disposable by design.** Each interview is one readable HTML file backed by a major-pinned CDN script.
+## What it supports
 
-## Give It to an Agent
+A single interview can combine several forms of review:
+
+| Type | Use |
+| --- | --- |
+| `choice` | Select one or several options from plain or visual cards |
+| `compare` | Evaluate alternatives against shared criteria |
+| `categorize` | Organize items into buckets using board or table views |
+| `flow` | Review and correct a proposed process or journey |
+| `edit` | Revise a proposed text or code artifact |
+
+Cards can include Markdown, labels, tooltips, and inline or file-based previews. Comments can be attached to options, comparison criteria, buckets, flow elements, and edits—including items you do not select.
+
+The library handles layout, navigation, progress, selection, editing, local state, Light and Dark themes, and concise text export. The generated file contains the interview content and loads the exact runtime version used to create it.
+
+## Give it to an agent
 
 Install the authoring skill:
 
@@ -24,55 +36,16 @@ Install the authoring skill:
 npx skills add apurin/interview-harness --list
 ```
 
-The skill teaches an agent when an interview is worthwhile, which questions belong in it, and how to generate the file. The full authoring guide is also readable at [skills/interview-harness/SKILL.md](skills/interview-harness/SKILL.md).
+Without installing anything, tell your agent: “Run an interactive interview for this project using the instructions in the [latest Interview Harness skill](https://cdn.jsdelivr.net/gh/apurin/interview-harness@latest/skills/interview-harness/SKILL.md).” Try it with a new or existing project in about a minute.
 
-## Author One Directly
+The skill teaches the agent when an interview is useful, which questions belong in it, and how to generate the local HTML file. Open the file, complete the interview, and return its exported answer to the agent.
 
-```html
-<script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@4/interview-harness.js"></script>
-<script>
-  InterviewHarness.mount({
-    title: "Shape the beta",
-    markdownIntro: "Resolve the **product direction** before implementation continues.",
-    questions: [
-      {
-        type: "choice",
-        prompt: "Which experience should anchor the beta?",
-        cards: [
-          {
-            title: "Command center",
-            tags: ["Recommended"],
-            markdown: "A dense operational workspace for **experienced teams**."
-          },
-          {
-            title: "Guided inbox",
-            markdown: "A prioritized daily workflow with faster onboarding."
-          }
-        ]
-      }
-    ]
-  });
-</script>
-```
-
-Save the file and open it directly in a browser. No hosting is required.
-
-## Question Types
-
-| Type | Collects |
-| --- | --- |
-| `choice` | One or several selections from plain or rich options |
-| `compare` | One decision across a shared comparison matrix |
-| `categorize` | A categorized scope or plan |
-| `flow` | Corrections to a directed process or journey |
-| `edit` | Changes to a text or code artifact |
-
-Cards accept Markdown, Markdown tooltips, tags, and inline or file-based HTML previews. The library supplies the responsive layout, navigation, progress, comments, editing, state, and text export. Interviews open in Light mode by default; a user’s Light/Dark choice is shared across same-origin interviews and carried between sequential local files opened in the same tab.
+The complete authoring reference is available in [skills/interview-harness/SKILL.md](skills/interview-harness/SKILL.md).
 
 <details>
 <summary>Maintaining the project</summary>
 
-The source is intentionally readable and unminified. Project policy lives in [AGENTS.md](AGENTS.md).
+Maintenance policy lives in [AGENTS.md](AGENTS.md).
 
 The README animation source and capture workflow live in [demo/](demo/README.md).
 
@@ -82,6 +55,6 @@ Release with:
 node scripts/release.mjs X.Y.Z
 ```
 
-The release script renders the skills, updates major-pinned URLs, commits, tags, pushes, and refreshes jsDelivr.
+The release script renders the skills with an exact-version runtime URL, commits and tags the release, pushes it, and refreshes the latest skill on jsDelivr.
 
 </details>

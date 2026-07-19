@@ -10,14 +10,14 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
   process.exit(1);
 }
 
-const major = version.split(".")[0];
 const tag = `v${version}`;
-const scriptUrl = `https://cdn.jsdelivr.net/gh/${repo}@${major}/interview-harness.js`;
-const assets = [
-  "interview-harness.js",
+const scriptUrl = `https://cdn.jsdelivr.net/gh/${repo}@${tag}/interview-harness.js`;
+const latestSkillUrl = `https://cdn.jsdelivr.net/gh/${repo}@latest/skills/interview-harness/SKILL.md`;
+const skillAssets = [
   "skills/interview-harness/SKILL.md",
   "skills/interview-harness-min/SKILL.md"
 ];
+const releaseAssets = ["interview-harness.js", ...skillAssets];
 
 function run(command, args) {
   console.log(`$ ${[command].concat(args).join(" ")}`);
@@ -33,6 +33,7 @@ async function fetchChecked(url, options) {
   if (!response.ok) {
     throw new Error(`${options?.method || "GET"} ${url} returned ${response.status}`);
   }
+  return response;
 }
 
 function render(sourcePath, targetPath) {
@@ -40,7 +41,6 @@ function render(sourcePath, targetPath) {
     targetPath,
     readFileSync(sourcePath, "utf8")
       .replaceAll("%VERSION%", version)
-      .replaceAll("%MAJOR%", major)
       .replaceAll("%SCRIPT_URL%", scriptUrl)
   );
 }
@@ -57,8 +57,16 @@ if (authoringReference(fullSkillTemplate) !== authoringReference(minimalSkillTem
   throw new Error("Minimal and full skill authoring references differ");
 }
 
-if (read("git", ["status", "--porcelain"])) {
-  throw new Error("Commit or remove working-tree changes before releasing");
+const readme = readFileSync("README.md", "utf8");
+if (!readme.includes(latestSkillUrl)) {
+  throw new Error(`README must link to the latest skill at ${latestSkillUrl}`);
+}
+if (/https:\/\/cdn\.jsdelivr\.net\/gh\/apurin\/interview-harness@[^/]+\/interview-harness\.js/.test(readme)) {
+  throw new Error("README must direct users through the skill instead of the runtime library");
+}
+
+if (read("git", ["status", "--porcelain", "--untracked-files=no"])) {
+  throw new Error("Commit tracked working-tree changes before releasing");
 }
 
 if (read("git", ["branch", "--show-current"]) !== "main") {
@@ -69,7 +77,7 @@ if (read("git", ["tag", "--list", tag])) {
   throw new Error(`${tag} already exists`);
 }
 
-console.log(`Preparing Interview Harness ${tag} on @${major}`);
+console.log(`Preparing Interview Harness ${tag} with ${scriptUrl}`);
 
 writeFileSync(
   "interview-harness.js",
@@ -80,26 +88,37 @@ writeFileSync(
 render("templates/skills/interview-harness/SKILL.md", "skills/interview-harness/SKILL.md");
 render("templates/skills/interview-harness-min/SKILL.md", "skills/interview-harness-min/SKILL.md");
 
+for (const asset of skillAssets) {
+  if (!readFileSync(asset, "utf8").includes(scriptUrl)) {
+    throw new Error(`${asset} does not reference the exact release runtime ${scriptUrl}`);
+  }
+}
+
 run(process.execPath, ["--check", "interview-harness.js"]);
-run("git", ["add", "-A"]);
+run("git", ["add", "--", ...releaseAssets]);
 run("git", ["commit", "--allow-empty", "-m", `Release ${tag}`]);
 run("git", ["tag", tag]);
 run("git", ["push", "origin", "HEAD:main"]);
 run("git", ["push", "origin", tag]);
 
-for (const alias of [major, "latest"]) {
-  for (const asset of assets) {
-    const url = `https://purge.jsdelivr.net/gh/${repo}@${alias}/${asset}`;
-    console.log(`Purging ${url}`);
-    await fetchChecked(url);
-  }
+for (const asset of skillAssets) {
+  const url = `https://purge.jsdelivr.net/gh/${repo}@latest/${asset}`;
+  console.log(`Purging ${url}`);
+  await fetchChecked(url);
 }
 
-for (const alias of [tag, major, "latest"]) {
-  for (const asset of assets) {
-    const url = `https://cdn.jsdelivr.net/gh/${repo}@${alias}/${asset}`;
-    console.log(`Fetching ${url}`);
-    await fetchChecked(url, { method: "HEAD" });
+console.log(`Verifying ${scriptUrl}`);
+const publishedScript = await (await fetchChecked(scriptUrl)).text();
+if (!publishedScript.includes(`const VERSION = "${version}";`)) {
+  throw new Error(`${scriptUrl} does not contain Interview Harness ${version}`);
+}
+
+for (const asset of skillAssets) {
+  const url = `https://cdn.jsdelivr.net/gh/${repo}@latest/${asset}`;
+  console.log(`Verifying ${url}`);
+  const publishedSkill = await (await fetchChecked(url)).text();
+  if (!publishedSkill.includes(scriptUrl)) {
+    throw new Error(`${url} does not reference the exact release runtime ${scriptUrl}`);
   }
 }
 

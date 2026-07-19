@@ -117,7 +117,7 @@
           },
           {
             type: "categorize",
-            prompt: "Place each product capability in the release sequence.",
+            prompt: "Review the release sequence as a board or table.",
             categories: ["Ship in beta", "Next release", "Later"],
             cards: [
               { title: "Unified source inbox", tags: ["Beta foundation"], markdown: "Import PDFs, saved web pages, and interview notes into one searchable queue with provenance and processing state.", markdownTooltip: "Start with PDF, web capture, and pasted notes; email and cloud-drive ingestion can follow.", htmlPreview: roadmapPreviews.inbox },
@@ -150,9 +150,30 @@
       });
 
       window.addEventListener("keydown", (event) => {
-        if (event.key.toLowerCase() !== "t") return;
-        const target = document.querySelector('.ih-evaluation-detail-button[data-detail-title="12 MB"]');
-        target?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        const key = event.key.toLowerCase();
+        if (key === "t") {
+          const target = document.querySelector('.ih-evaluation-detail-button[data-detail-title="12 MB"]');
+          target?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        }
+        if (key === "r") {
+          const placements = new Map([
+            ["Unified source inbox", "Ship in beta"],
+            ["Evidence board", "Ship in beta"],
+            ["Citation-backed brief editor", "Ship in beta"],
+            ["Review and approval queue", "Next release"],
+            ["Export packages", "Next release"],
+            ["Workspace roles and audit log", "Next release"],
+            ["Continuous source monitoring", "Later"],
+            ["Public API and webhooks", "Later"]
+          ]);
+          document.querySelectorAll(".ih-bucket-card").forEach((card) => {
+            const bucket = placements.get(card.querySelector("h3")?.textContent?.trim());
+            if (!bucket) return;
+            [...card.querySelectorAll(".ih-move-option")]
+              .find((button) => button.textContent.trim() === bucket)
+              ?.click();
+          });
+        }
       });
 
     </script>
