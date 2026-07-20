@@ -3655,7 +3655,9 @@
   const questionAnsweredChecks = {
     choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
     evaluation: (_questionDef, answer) => Boolean(answer.selected),
-    bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(answer.buckets && answer.buckets[entry.id])),
+    bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(
+      answer.buckets && answer.buckets[entry.id] || String(optionComment(answer, entry.id)).trim()
+    )),
     flow: (_questionDef, answer) => Boolean(answer.confirmed),
     edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
   };
