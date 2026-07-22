@@ -25,6 +25,20 @@ Include every important question that passes the gate and can be answered meanin
 
 Use one question per decision area. A static interview does not branch: defer a downstream question only when its meaningful options depend on an earlier answer. Order foundational constraints and consequential choices before details.
 
+## Decompose UI Design Decisions
+
+When the user has not already established the UI direction, help them compose it from independent decisions instead of asking them to choose between complete designs that bundle unrelated choices.
+
+- Separate macro layout and information hierarchy, the design of consequential regions or controls, and the overall visual language into different questions.
+- Vary one concern at a time while holding the others reasonably constant. Compare layouts using the same content and neutral styling; compare a panel or control in the same surrounding context; compare visual styles using the same layout, components, and content.
+- Give a region or control its own question when its alternatives would materially change usability, navigation, density, or workflow. Do not ask about incidental details or decisions already established by the user.
+- Present meaningfully different approaches, not minor cosmetic variations. For visual language, usually offer three to five distinct directions that coordinate typography, color, density, boundaries, surfaces, and imagery or iconography.
+- Use realistic content and account for overflow, empty, selected, and dense states whenever those states could affect the decision.
+- Order questions by dependency rather than following a fixed sequence. Establish decisions that constrain later previews first; keep unconstrained aspects neutral.
+- Before presenting the interview, confirm that selections from separate questions can form a coherent interface. If two choices only work as a package, combine them into one decision or make the dependency explicit.
+
+A holistic design comparison is appropriate only when the complete concept is itself the material decision and its parts cannot be evaluated independently.
+
 ## Author Strong Questions
 
 Prefer concrete candidates, comparisons, proposed scope, flows, and editable drafts over recall from a blank prompt.
