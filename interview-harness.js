@@ -10,6 +10,7 @@
   const DEFAULT_TARGET_ID = "interview-harness";
   const THEME_STORAGE_KEY = "interview-harness:theme";
   const THEME_WINDOW_NAME_PREFIX = "__IH_THEME__:";
+  const COLUMN_WIDTHS = ["narrow", "medium", "wide"];
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
   const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
   const CODEMIRROR_URL = "https://esm.sh/codemirror@6.0.2";
@@ -35,11 +36,13 @@
     compare: (raw) => ({
       type: "evaluation",
       select: "one",
+      columnWidth: normalizeColumnWidth(raw.columnWidth, `${raw.sourcePath}.columnWidth`),
       options: normalizeCards(raw.cards, raw.id, raw.sourcePath),
       rows: normalizeCriteria(raw.criteria, raw.id, raw.sourcePath, asArray(raw.cards).length)
     }),
     categorize: (raw) => ({
       type: "bucket",
+      columnWidth: normalizeColumnWidth(raw.columnWidth, `${raw.sourcePath}.columnWidth`),
       buckets: normalizeCategories(raw.categories, raw.id, raw.sourcePath),
       options: normalizeCards(raw.cards, raw.id, raw.sourcePath)
     }),
@@ -54,9 +57,13 @@
 
   function normalizeChoiceQuestion(raw) {
     if (raw.multiple !== undefined && typeof raw.multiple !== "boolean") throw new TypeError(`${raw.sourcePath}.multiple must be a boolean.`);
+    const options = normalizeCards(raw.cards, raw.id, raw.sourcePath);
+    const layout = cardLayout(options);
+    const defaultColumnWidth = layout === 2 ? "medium" : layout === 1 ? "wide" : "narrow";
     return {
       select: raw.multiple === true ? "many" : "one",
-      options: normalizeCards(raw.cards, raw.id, raw.sourcePath)
+      columnWidth: normalizeColumnWidth(raw.columnWidth, `${raw.sourcePath}.columnWidth`, defaultColumnWidth),
+      options
     };
   }
 
@@ -83,9 +90,9 @@
     const raw = requireObject(input, path);
     const type = requiredString(raw.type, `${path}.type`).toLowerCase();
     const allowed = {
-      choice: ["type", "prompt", "multiple", "cards"],
-      compare: ["type", "prompt", "cards", "criteria"],
-      categorize: ["type", "prompt", "categories", "cards"],
+      choice: ["type", "prompt", "multiple", "columnWidth", "cards"],
+      compare: ["type", "prompt", "columnWidth", "cards", "criteria"],
+      categorize: ["type", "prompt", "columnWidth", "categories", "cards"],
       flow: ["type", "prompt", "connections"],
       edit: ["type", "prompt", "value", "language"]
     }[type];
@@ -287,7 +294,10 @@
 
   function createInitialState(config) {
     const answers = Object.fromEntries(config.questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
-    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, commentEditor: null, detailPopover: null, answers };
+    const columnWidths = Object.fromEntries(config.questions
+      .filter(isColumnWidthQuestion)
+      .map((questionDef) => [questionDef.id, questionDef.columnWidth || "narrow"]));
+    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths, commentEditor: null, detailPopover: null, answers };
   }
 
   function initialAnswer(questionDef) {
@@ -303,6 +313,12 @@
       bucketViews: Object.fromEntries(questions
         .filter((questionDef) => questionDef.type === "bucket" && safeObject(saved.bucketViews)[questionDef.id] === "table")
         .map((questionDef) => [questionDef.id, "table"])),
+      columnWidths: Object.fromEntries(questions
+        .filter(isColumnWidthQuestion)
+        .map((questionDef) => {
+          const savedWidth = columnWidthValue(safeObject(saved.columnWidths)[questionDef.id]);
+          return [questionDef.id, savedWidth || safeObject(current.columnWidths)[questionDef.id] || questionDef.columnWidth || "narrow"];
+        })),
       commentEditor: null,
       detailPopover: null,
       answers: Object.assign({}, current.answers)
@@ -618,6 +634,7 @@
       align-items: end;
       margin-bottom: clamp(16px, 2.4vw, 24px);
     }
+    .ih-question-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 10px; }
     .ih-question-head > div { min-width: 0; }
     .ih-kicker { margin: 0 0 8px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
     .ih-prompt { margin: 0; max-width: 980px; font-size: clamp(22px, 2.5vw, 34px); line-height: 1.12; letter-spacing: 0; }
@@ -819,6 +836,8 @@
       background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
       overflow: visible;
     }
+    .ih-evaluation-board[data-column-width="medium"] { --ih-evaluation-column-width: 460px; }
+    .ih-evaluation-board[data-column-width="wide"] { --ih-evaluation-column-width: 680px; }
     .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
     .ih-evaluation-header-frame {
@@ -975,12 +994,38 @@
     }
     .ih-grip:active { cursor: grabbing; }
     .ih-bucket-frame { --ih-bucket-column-width: min(420px, calc(100vw - 64px)); overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
+    .ih-bucket-frame[data-column-width="medium"] { --ih-bucket-column-width: min(600px, calc(100vw - 64px)); }
+    .ih-bucket-frame[data-column-width="wide"] { --ih-bucket-column-width: min(780px, calc(100vw - 64px)); }
     .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: max-content; }
     .ih-bucket { width: var(--ih-bucket-column-width); flex: 0 0 var(--ih-bucket-column-width); display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
     .ih-bucket-view-toolbar { display: flex; justify-content: end; align-self: end; }
+    .ih-column-width-control { display: inline-flex; align-items: center; gap: 8px; }
+    .ih-column-width-label { color: var(--ih-muted); font-size: 12px; font-weight: 760; }
+    .ih-column-width-options {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      border-radius: 999px;
+      background: var(--ih-surface-2);
+      padding: 3px;
+    }
+    .ih-app .ih-column-width-option {
+      width: 34px;
+      height: 32px;
+      display: inline-grid;
+      place-items: center;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ih-muted);
+      padding: 7px;
+    }
+    .ih-column-width-option svg { display: block; width: 20px; height: 20px; }
+    .ih-column-width-option:hover { color: var(--ih-ink); }
+    .ih-column-width-option.is-selected { background: var(--ih-accent); color: var(--ih-accent-ink); }
     .ih-bucket-view-options,
     .ih-bucket-state-options {
       display: inline-flex;
@@ -1238,6 +1283,9 @@
     .ih-kicker { color: var(--ih-muted); letter-spacing: .04em; text-transform: none; }
     .ih-prompt { max-width: 960px; font-size: clamp(26px, 2.8vw, 38px); letter-spacing: -.035em; }
     .ih-grid { column-width: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .ih-grid[data-column-width="narrow"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ih-grid[data-column-width="medium"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ih-grid[data-column-width="wide"] { grid-template-columns: minmax(0, 1fr); }
     .ih-grid > .ih-card { height: 100%; margin: 0; }
     .ih-card {
       border: 1px solid transparent;
@@ -1346,7 +1394,9 @@
       .ih-choice { min-height: 0; }
     }
     @media (max-width: 680px) {
-      .ih-grid[data-cards-per-row] { grid-template-columns: minmax(0, 1fr); }
+      .ih-question-head { grid-template-columns: minmax(0, 1fr); align-items: start; }
+      .ih-question-tools { justify-content: start; }
+      .ih-grid[data-column-width] { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection-actions { justify-self: start; }
       .ih-flow-canvas { min-height: 400px; height: 60vh; }
@@ -1433,8 +1483,13 @@
   }
 
   function renderQuestionStep(instance, questionDef, index) {
-    const bucketViewSwitch = questionDef.type === "bucket"
-      ? renderBucketViewSwitch(instance.bucketView(questionDef.id))
+    const bucketView = questionDef.type === "bucket" ? instance.bucketView(questionDef.id) : "";
+    const bucketViewSwitch = questionDef.type === "bucket" ? renderBucketViewSwitch(bucketView) : "";
+    const columnWidthControl = shouldRenderColumnWidthControl(questionDef, bucketView)
+      ? renderColumnWidthControl(instance.columnWidth(questionDef.id), questionDef.type)
+      : "";
+    const questionTools = bucketViewSwitch || columnWidthControl
+      ? `<div class="ih-question-tools">${bucketViewSwitch}${columnWidthControl}</div>`
       : "";
     return `
       <section class="ih-step" id="ih-question-${index}" data-question-id="${escapeAttr(questionDef.id)}" data-question-index="${index}">
@@ -1443,7 +1498,7 @@
             <p class="ih-kicker">Question ${index + 1} / ${instance.config.questions.length}</p>
             <h2 class="ih-prompt">${escapeHTML(questionDef.prompt)}</h2>
           </div>
-          ${bucketViewSwitch}
+          ${questionTools}
         </div>
         ${renderQuestionBody(questionDef, instance.state.answers[questionDef.id], instance)}
       </section>
@@ -1462,15 +1517,16 @@
     return questionRenderers[questionDef.type](questionDef, answer, instance);
   }
 
-  function renderChoice(questionDef, answer) {
+  function renderChoice(questionDef, answer, instance) {
     const multiple = questionDef.select === "many";
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
     const layout = cardLayout(questionDef.options);
     const gridClass = layout === "stack" ? "ih-stack" : "ih-grid";
     const layoutAttr = Number.isInteger(layout) ? ` data-cards-per-row="${layout}"` : "";
+    const widthAttr = gridClass === "ih-grid" ? ` data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}"` : "";
     const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id))).join("");
     const addRow = multiple ? renderAddRow("Add another option") : "";
-    return `<div class="${gridClass}"${layoutAttr}>${options}</div>${addRow}`;
+    return `<div class="${gridClass}"${layoutAttr}${widthAttr}>${options}</div>${addRow}`;
   }
 
   function renderChoiceOption(entry, answer, isSelected) {
@@ -1500,7 +1556,7 @@
     `;
   }
 
-  function renderEvaluation(questionDef, answer) {
+  function renderEvaluation(questionDef, answer, instance) {
     const selectedIds = asArray(answer.selected ? [answer.selected] : []);
     const body = [];
     let previousGroup = null;
@@ -1512,7 +1568,7 @@
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
     });
     return `
-      <div class="ih-evaluation-board">
+      <div class="ih-evaluation-board" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}">
         <div class="ih-evaluation-head">
           <p class="ih-evaluation-note">Select one column. Comment on columns or criteria when the comparison needs clarification.</p>
         </div>
@@ -1618,7 +1674,7 @@
 
   function renderBucket(questionDef, answer, instance) {
     const view = instance.bucketView(questionDef.id);
-    return view === "table" ? renderBucketTable(questionDef, answer) : renderBucketBoard(questionDef, answer);
+    return view === "table" ? renderBucketTable(questionDef, answer) : renderBucketBoard(questionDef, answer, instance);
   }
 
   function renderBucketViewSwitch(view) {
@@ -1632,7 +1688,25 @@
     `;
   }
 
-  function renderBucketBoard(questionDef, answer) {
+  function renderColumnWidthControl(width, questionType) {
+    const choiceLabels = { narrow: "Three columns", medium: "Two columns", wide: "One column" };
+    return `
+      <div class="ih-column-width-control">
+        <span class="ih-column-width-label">Width</span>
+        <div class="ih-column-width-options" role="group" aria-label="Column width">
+          ${COLUMN_WIDTHS.map((entry) => {
+            const selected = entry === width;
+            const label = questionType === "choice"
+              ? choiceLabels[entry]
+              : `${entry[0].toUpperCase()}${entry.slice(1)} columns`;
+            return `<button class="ih-column-width-option ${selected ? "is-selected" : ""}" type="button" data-action="set-column-width" data-column-width="${entry}" aria-label="${label}" title="${label}" aria-pressed="${selected ? "true" : "false"}">${columnWidthIcon(entry)}</button>`;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBucketBoard(questionDef, answer, instance) {
     const byBucket = {};
     questionDef.buckets.forEach((bucket) => { byBucket[bucket.id] = []; });
     const unset = [];
@@ -1643,7 +1717,7 @@
     });
 
     return `
-      <div class="ih-bucket-frame" tabindex="0" aria-label="Buckets">
+      <div class="ih-bucket-frame" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}" tabindex="0" aria-label="Buckets">
         <div class="ih-bucket-board">
           <section class="ih-bucket" data-bucket-id="">
             <div class="ih-bucket-title">Unsorted</div>
@@ -1845,6 +1919,18 @@
     return cards.some((card) => card.markdown) ? "auto" : "stack";
   }
 
+  function isColumnWidthQuestion(questionDef) {
+    return Boolean(questionDef && ["choice", "evaluation", "bucket"].includes(questionDef.type));
+  }
+
+  function shouldRenderColumnWidthControl(questionDef, bucketView) {
+    if (!isColumnWidthQuestion(questionDef)) return false;
+    if (questionDef.type === "bucket") return bucketView !== "table";
+    if (questionDef.type === "evaluation") return questionDef.options.length > 1;
+    const layout = cardLayout(questionDef.options);
+    return questionDef.options.length > 1 && layout !== "stack" && layout !== 1;
+  }
+
   function renderCardContent(card) {
     const parts = [];
     if (card.markdown) parts.push(`<div class="ih-rich ih-markdown">${renderMarkdown(card.markdown)}</div>`);
@@ -1968,6 +2054,18 @@
 
   function trashIcon() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M19 2H5a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3V5a3 3 0 0 0-3-3m-9.387 6.21l.094.083L12 10.585l2.293-2.292a1 1 0 0 1 1.497 1.32l-.083.094L13.415 12l2.292 2.293a1 1 0 0 1-1.32 1.497l-.094-.083L12 13.415l-2.293 2.292a1 1 0 0 1-1.497-1.32l.083-.094L10.585 12L8.293 9.707a1 1 0 0 1 1.32-1.497"/></svg>`;
+  }
+
+  function columnWidthIcon(width) {
+    const columns = width === "wide" ? 1 : width === "medium" ? 2 : 3;
+    const gap = 2;
+    const available = 20 - ((columns - 1) * gap);
+    const columnWidth = available / columns;
+    const rects = Array.from({ length: columns }, (_, index) => {
+      const x = 2 + (index * (columnWidth + gap));
+      return `<rect x="${x}" y="5" width="${columnWidth}" height="14" rx="1.5"/>`;
+    }).join("");
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">${rects}</svg>`;
   }
 
   function evaluationIcon(icon) {
@@ -2139,6 +2237,13 @@
       return safeObject(this.state.bucketViews)[questionId] === "table" ? "table" : "board";
     }
 
+    columnWidth(questionId) {
+      const context = this.contextByQuestionId(questionId);
+      return columnWidthValue(safeObject(this.state.columnWidths)[questionId])
+        || context && context.questionDef.columnWidth
+        || "narrow";
+    }
+
     setTheme(theme, persist = true) {
       const nextTheme = normalizeTheme(theme) || "light";
       const changed = nextTheme !== this.theme;
@@ -2203,6 +2308,7 @@
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
       if (action === "set-bucket-view") return this.setBucketView(actionEl.dataset.bucketView, context);
+      if (action === "set-column-width") return this.setColumnWidth(actionEl.dataset.columnWidth, context);
       if (action === "choose-option") return this.chooseOption(actionEl.dataset.optionId, context);
       if (action === "choose-evaluation-option") return this.chooseEvaluationOption(actionEl.dataset.optionId, context);
       if (action === "move-bucket-option") return this.moveBucketOption(actionEl, context);
@@ -2429,6 +2535,18 @@
       this.state.bucketViews = Object.assign({}, safeObject(this.state.bucketViews));
       if (view === "table") this.state.bucketViews[context.questionDef.id] = "table";
       else delete this.state.bucketViews[context.questionDef.id];
+      this.state.commentEditor = null;
+      this.state.detailPopover = null;
+      this.save();
+      this.render();
+    }
+
+    setColumnWidth(width, context) {
+      const nextWidth = columnWidthValue(width);
+      if (!context || !isColumnWidthQuestion(context.questionDef) || !nextWidth) return;
+      this.state.columnWidths = Object.assign({}, safeObject(this.state.columnWidths), {
+        [context.questionDef.id]: nextWidth
+      });
       this.state.commentEditor = null;
       this.state.detailPopover = null;
       this.save();
@@ -3414,9 +3532,11 @@
       if (!global.confirm("Reset this interview and clear saved answers?")) return;
       const viewMode = this.state.viewMode;
       const bucketViews = this.state.bucketViews;
+      const columnWidths = this.state.columnWidths;
       this.state = createInitialState(this.config);
       this.state.viewMode = viewMode;
       this.state.bucketViews = bucketViews;
+      this.state.columnWidths = columnWidths;
       this.flowHistories.clear();
       if (this.config.storageKey) {
         try {
@@ -3973,6 +4093,19 @@
     if (value === undefined || value === null) return "";
     if (typeof value !== "string") throw new TypeError(`${path} must be a string.`);
     return value;
+  }
+
+  function columnWidthValue(value) {
+    const width = typeof value === "string" ? value.trim().toLowerCase() : "";
+    return COLUMN_WIDTHS.includes(width) ? width : "";
+  }
+
+  function normalizeColumnWidth(value, path, fallback = "narrow") {
+    if (value === undefined || value === null) return fallback;
+    if (typeof value !== "string") throw new TypeError(`${path} must be narrow, medium, or wide.`);
+    const width = columnWidthValue(value);
+    if (!width) throw new TypeError(`${path} must be narrow, medium, or wide.`);
+    return width;
   }
 
   function assertKnownFields(value, allowed, path) {

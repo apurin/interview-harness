@@ -70,6 +70,8 @@ Every card uses:
 
 Put the main card description in `markdown`. Use `markdownTooltip` only for useful secondary context that would impede scanning. Raw `htmlPreview` is shown inline; prefix a local HTML filename with `file:` to show it in a full-width iframe. Layout is automatic: one card per row for file previews, at most two for inline previews, and compact cards without previews.
 
+Choice, compare, and categorize questions accept `columnWidth: "narrow" | "medium" | "wide"` to preselect the user-adjustable column width. Choice maps those presets to three, two, or one card per row and preserves its previous automatic count when omitted; compare and categorize default to narrow. Categorize shows the width control only in Board view.
+
 ### Choice
 
 ```js
@@ -77,6 +79,7 @@ Put the main card description in `markdown`. Use `markdownTooltip` only for usef
   type: "choice",
   prompt: "Which direction should steer the build?",
   multiple: true, // omit for one selection
+  columnWidth: "medium", // optional; two cards per row
   cards: [card, card]
 }
 ```
@@ -89,6 +92,7 @@ Multiple choice also lets the user add an option.
 {
   type: "compare",
   prompt: "Which technology best fits this project?",
+  columnWidth: "wide", // optional
   cards: [card, card, card],
   criteria: [
     {
@@ -113,6 +117,7 @@ Each criterion has one positional value per card. A value is Markdown text or `{
 {
   type: "categorize",
   prompt: "Place each capability in the release plan.",
+  columnWidth: "medium", // optional; applies to Board view
   categories: ["Now", "Next", "Later"],
   cards: [card, card]
 }
