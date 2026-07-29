@@ -5,13 +5,15 @@ description: Create a local visual interview from already-planned questions usin
 
 # Interview Harness
 
-Create one local HTML interview that lets the user select, comment on, correct, and refine generated material. Load the harness from `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v5.3.0/interview-harness.js`. This skill is the complete authoring reference; do not read or copy the library source.
+Create one local HTML interview that lets the user select, comment on, correct, and refine generated material. Load the harness from `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v5.4.0/interview-harness.js`. This skill is the complete authoring reference; do not read or copy the library source.
 
 Save the page as a `.html` file and present its path. The user can open it directly in a browser. Do not host it or start a server.
 
 ## Authoring API
 
 Call `InterviewHarness.mount({ title, markdownIntro?, questions })`. Use only documented fields; invalid shapes fail with a path-specific error. The harness creates its own page container, IDs, layout, state, navigation, comments, and export.
+
+Usually omit `markdownIntro`. When the file itself needs context, use one short sentence that states what the user is reviewing. Put project background, research, rationale, and usage instructions in the reply that links to the interview.
 
 Every card uses:
 
@@ -97,12 +99,14 @@ Omit a connection label when it adds no meaning.
 
 ### Edit
 
+An edit question must contain one cohesive artifact that the user can revise independently. Never use it as a cumulative project summary, constitution, or repetition of decisions handled elsewhere. Split independent sections into separate edit questions. Produce the complete synthesis after the user returns the interview.
+
 ```js
 {
   type: "edit",
-  prompt: "Edit the proposed specification.",
+  prompt: "Refine this proposed success criterion.",
   language: "markdown",
-  value: "# Draft"
+  value: "A new user can finish setup and create their first project in under five minutes."
 }
 ```
 
@@ -117,11 +121,10 @@ Omit a connection label when it adds no meaning.
     <title>Interview title</title>
   </head>
   <body>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v5.3.0/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v5.4.0/interview-harness.js"></script>
     <script>
       InterviewHarness.mount({
         title: "Interview title",
-        markdownIntro: "Short context for the user.",
         questions: [{
           type: "choice",
           prompt: "Which direction should steer the work?",
