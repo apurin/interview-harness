@@ -56,6 +56,8 @@ Users can comment on cards, columns, criteria, flow elements, and edits, includi
 
 Call `InterviewHarness.mount({ title, markdownIntro?, questions })`. Use only documented fields; invalid shapes fail with a path-specific error. The harness creates its own page container, IDs, layout, state, navigation, comments, and export.
 
+Usually omit `markdownIntro`. When the file itself needs context, use one short sentence that states what the user is reviewing. Put project background, research, rationale, and usage instructions in the reply that links to the interview.
+
 Every card uses:
 
 ```js
@@ -140,12 +142,14 @@ Omit a connection label when it adds no meaning.
 
 ### Edit
 
+An edit question must contain one cohesive artifact that the user can revise independently. Never use it as a cumulative project summary, constitution, or repetition of decisions handled elsewhere. Split independent sections into separate edit questions. Produce the complete synthesis after the user returns the interview.
+
 ```js
 {
   type: "edit",
-  prompt: "Edit the proposed specification.",
+  prompt: "Refine this proposed success criterion.",
   language: "markdown",
-  value: "# Draft"
+  value: "A new user can finish setup and create their first project in under five minutes."
 }
 ```
 
@@ -164,7 +168,6 @@ Omit a connection label when it adds no meaning.
     <script>
       InterviewHarness.mount({
         title: "Interview title",
-        markdownIntro: "Short context for the user.",
         questions: [{
           type: "choice",
           prompt: "Which direction should steer the work?",
