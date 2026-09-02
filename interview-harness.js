@@ -13,6 +13,7 @@
   const COLUMN_WIDTHS = ["narrow", "medium", "wide"];
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
   const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
+  const LINES_AND_ARROWS_URL = "https://cdn.jsdelivr.net/npm/lines-and-arrows@0.15.0/dist/lines-and-arrows.auto.min.js";
   const CODEMIRROR_URL = "https://esm.sh/codemirror@6.0.2";
   const CODEMIRROR_THEME_URL = "https://esm.sh/@codemirror/theme-one-dark@6.1.3";
   const CODEMIRROR_LANGS = {
@@ -26,6 +27,7 @@
   const MARKED_URL = "https://cdn.jsdelivr.net/npm/marked@18.0.5/lib/marked.umd.js";
   let sortablePromise = null;
   let visNetworkPromise = null;
+  let linesAndArrowsPromise = null;
   let codeMirrorPromise = null;
   let codeMirrorThemePromise = null;
   let markedPromise = null;
@@ -48,6 +50,9 @@
     }),
     flow: (raw) => ({
       connections: normalizeFlowConnections(raw.connections, true, raw.sourcePath)
+    }),
+    sequence: (raw) => ({
+      source: requiredString(raw.source, `${raw.sourcePath}.source`)
     }),
     edit: (raw) => ({
       artifact: { view: "code", lang: String(raw.language || ""), value: String(raw.value || "") },
@@ -94,9 +99,10 @@
       compare: ["type", "prompt", "columnWidth", "cards", "criteria"],
       categorize: ["type", "prompt", "columnWidth", "categories", "cards"],
       flow: ["type", "prompt", "connections"],
+      sequence: ["type", "prompt", "source"],
       edit: ["type", "prompt", "value", "language"]
     }[type];
-    if (!allowed) throw new TypeError(`${path}.type must be choice, compare, categorize, flow, or edit.`);
+    if (!allowed) throw new TypeError(`${path}.type must be choice, compare, categorize, flow, sequence, or edit.`);
     assertKnownFields(raw, allowed, path);
     const id = `q${index + 1}`;
     raw.id = id;
@@ -233,6 +239,15 @@
     };
   }
 
+  function initialSequenceAnswer(questionDef) {
+    return {
+      source: questionDef.source,
+      comment: "",
+      confirmed: false,
+      touched: false
+    };
+  }
+
   // State and export logic ---------------------------------------------------
 
   const initialAnswers = {
@@ -242,6 +257,7 @@
     evaluation: (_questionDef) => ({ selected: "", optionComments: {}, rowComments: {}, touched: false }),
     bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
     flow: initialFlowAnswer,
+    sequence: initialSequenceAnswer,
     edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", touched: false })
   };
 
@@ -285,6 +301,14 @@
         : Boolean(saved.updated);
       answer.confirmed = Boolean(saved.confirmed || answer.updated);
       answer.touched = Boolean(saved.touched || answer.confirmed || isFlowChanged(questionDef, answer));
+    },
+    sequence(questionDef, answer, saved, initial) {
+      answer.source = typeof saved.source === "string" && saved.source.trim()
+        ? saved.source
+        : initial.source;
+      answer.comment = String(saved.comment || "");
+      answer.confirmed = Boolean(saved.confirmed);
+      answer.touched = Boolean(saved.touched || answer.confirmed || answer.comment);
     },
     edit(questionDef, answer, saved) {
       answer.summary = String(saved.summary || "");
@@ -347,6 +371,7 @@
     evaluation: appendEvaluationAnswer,
     bucket: appendBucketAnswer,
     flow: appendFlowAnswer,
+    sequence: appendSequenceAnswer,
     edit: appendEditAnswer
   };
 
@@ -459,6 +484,17 @@
     }
   }
 
+  function appendSequenceAnswer(lines, questionDef, answer) {
+    if (answer.confirmed) {
+      lines.push(isSequenceChanged(questionDef, answer) ? "Status: Updated." : "Status: Confirmed unchanged.");
+      lines.push("Final sequence:");
+      lines.push("```lines-and-arrows");
+      lines.push(normalizeSequenceSource(answer.source));
+      lines.push("```");
+    }
+    if (answer.comment) lines.push(`Overall comment: ${answer.comment}`);
+  }
+
   function appendComments(lines, comments, heading) {
     if (!comments.length) return;
     lines.push(heading || "Comments:");
@@ -483,6 +519,7 @@
       optionComments(questionDef.options, answer.comments).length
     ),
     flow: (questionDef, answer) => Boolean(answer.confirmed || isFlowChanged(questionDef, answer)),
+    sequence: (_questionDef, answer) => Boolean(answer.confirmed || answer.comment),
     edit: (questionDef, answer) => Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary)
   };
 
@@ -1116,6 +1153,15 @@
     .ih-flow-selection-empty { grid-column: 1 / -1; margin: 0; color: var(--ih-muted); font-size: 13px; }
     .ih-flow-selected-value { min-width: 0; }
     .ih-flow-selection-actions { display: inline-flex; align-items: center; gap: 8px; }
+    .ih-sequence { padding: 0; overflow: hidden; }
+    .ih-sequence-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border-bottom: 1px solid var(--ih-line); background: var(--ih-surface-2); }
+    .ih-sequence-status { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; }
+    .ih-sequence-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .ih-sequence-editor { min-height: 360px; background: var(--ih-code-bg); }
+    .ih-sequence-editor lines-and-arrows { display: block; width: 100%; min-height: 360px; }
+    .ih-sequence-loading { min-height: 360px; display: grid; place-items: center; color: var(--ih-muted); font-size: 13px; }
+    .ih-sequence-error { margin: 0; padding: 10px 12px; border-top: 1px solid var(--ih-line); color: var(--ih-danger); background: var(--ih-surface-2); font-size: 13px; }
+    .ih-sequence-fallback { min-height: 360px; border: 0; border-top: 1px solid var(--ih-line); border-radius: 0; }
     .ih-edit { display: grid; gap: 10px; }
     .ih-code-editor-host, .ih-code-fallback {
       min-height: 440px;
@@ -1130,6 +1176,7 @@
     .ih-code-editor-host .cm-editor { font-size: 13px; }
     .ih-code-editor-host .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; }
     .ih-code-fallback { display: block; width: 100%; padding: 12px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; white-space: pre; }
+    .ih-sequence-fallback[hidden] { display: none; }
     [data-edit].has-editor .ih-code-editor-host { display: block; }
     [data-edit].has-editor .ih-code-fallback { display: none; }
     .ih-editor-loading { color: var(--ih-muted); font-size: 13px; padding: 12px 0 0; }
@@ -1355,6 +1402,8 @@
     .ih-flow,
     .ih-flow-toolbar,
     .ih-flow-selection { background: var(--ih-surface); }
+    .ih-sequence,
+    .ih-sequence-toolbar { background: var(--ih-surface); }
     .ih-flow-canvas {
       background:
         linear-gradient(color-mix(in srgb, var(--ih-line) 52%, transparent) 1px, transparent 1px),
@@ -1510,6 +1559,7 @@
     evaluation: renderEvaluation,
     bucket: renderBucket,
     flow: renderFlow,
+    sequence: renderSequence,
     edit: renderEdit
   };
 
@@ -1891,6 +1941,29 @@
     `;
   }
 
+  function renderSequence(questionDef, answer) {
+    const updated = isSequenceChanged(questionDef, answer);
+    const status = answer.confirmed
+      ? updated ? "Sequence updated." : "Sequence confirmed as proposed."
+      : "Correct the sequence visually, or confirm the proposal.";
+    return `
+      <div class="ih-card ih-sequence" data-sequence>
+        <div class="ih-sequence-toolbar">
+          <p class="ih-sequence-status" data-sequence-status>${escapeHTML(status)}</p>
+          <div class="ih-sequence-actions" data-sequence-actions>
+            ${answer.confirmed ? "" : `<button class="ih-btn" type="button" data-action="sequence-confirm">Confirm as proposed</button>`}
+            ${renderCommentButton("sequence-comment", "", answer.comment || "", "Comment on sequence")}
+          </div>
+        </div>
+        <div class="ih-sequence-editor" data-sequence-editor>
+          <span class="ih-sequence-loading">Loading sequence editor...</span>
+        </div>
+        <p class="ih-sequence-error" data-sequence-error hidden></p>
+        <textarea class="ih-code-fallback ih-sequence-fallback" data-input="sequence-source" spellcheck="false" wrap="off" hidden>${escapeHTML(answer.source || "")}</textarea>
+      </div>
+    `;
+  }
+
   function renderExportStep(instance) {
     const text = instance.getText();
     return `
@@ -2094,6 +2167,7 @@
 
   function getCommentValue(answer, kind, optionId) {
     if (!answer) return "";
+    if (kind === "sequence-comment") return answer.comment || "";
     if (kind === "flow-comment") return answer.comment || "";
     if (kind === "flow-node-comment") {
       const node = flowNodeByName(answer, optionId);
@@ -2111,6 +2185,10 @@
 
   function setCommentValue(answer, kind, optionId, value) {
     const textValue = String(value || "");
+    if (kind === "sequence-comment") {
+      answer.comment = textValue;
+      return;
+    }
     if (kind === "flow-comment") {
       answer.comment = textValue;
       return;
@@ -2165,6 +2243,7 @@
       this.flowEditors = [];
       this.flowHistories = new Map();
       this.flowViewCleanups = [];
+      this.sequenceCleanups = [];
       this.codeEditors = [];
       this.frameObjectUrls = [];
       this.evaluationScrollCleanups = [];
@@ -2220,6 +2299,7 @@
         this.initEvaluationHeaderScroll();
         this.initSortables();
         this.initFlowEditors();
+        this.initSequenceEditors();
         this.initCodeEditors();
         const comment = this.root.querySelector("[data-input='comment-modal']");
         if (comment) {
@@ -2322,6 +2402,7 @@
       if (action === "flow-undo") return this.undoFlow(context);
       if (action === "flow-redo") return this.redoFlow(context);
       if (action === "flow-arrange") return this.arrangeFlow(context);
+      if (action === "sequence-confirm") return this.confirmSequence(context);
     }
 
     onMouseover(event) {
@@ -2385,6 +2466,13 @@
       }
       if (kind === "added-title") this.updateAddedTitle(input.dataset.optionId, input.value, context);
       if (kind === "edit-content") answer.content = input.value;
+      if (kind === "sequence-source") {
+        answer.source = input.value;
+        const validation = validateSequenceSource(answer.source);
+        answer.confirmed = validation.valid;
+        this.refreshSequenceFallbackError(input, validation);
+        this.refreshSequenceResponse(context);
+      }
 
       autoGrowTextarea(input);
       this.markChanged(answer, true);
@@ -2397,6 +2485,7 @@
     }
 
     onKeydown(event) {
+      if (event.composedPath && event.composedPath().some((node) => node && node.tagName === "LINES-AND-ARROWS")) return;
       const flowInput = event.target && event.target.closest && event.target.closest("[data-input='flow-selected-value'], [data-input='flow-new-node']");
       if (flowInput && event.key === "Enter") {
         event.preventDefault();
@@ -2564,7 +2653,13 @@
       };
       this.state.detailPopover = null;
       this.save();
-      this.render();
+      this.root.querySelector(".ih-comment-popover-backdrop")?.remove();
+      this.root.querySelector(".ih-app")?.insertAdjacentHTML("beforeend", renderCommentPopover(this));
+      const comment = this.root.querySelector("[data-input='comment-modal']");
+      if (comment) {
+        comment.focus();
+        autoGrowTextarea(comment);
+      }
     }
 
     closeComment() {
@@ -2573,7 +2668,8 @@
       if (context && context.questionDef.type === "flow") this.finishFlowHistoryTransaction(context);
       this.state.commentEditor = null;
       this.save();
-      this.render();
+      this.root.querySelector(".ih-comment-popover-backdrop")?.remove();
+      this.syncOpenCommentButton();
     }
 
     showEvaluationDetail(button) {
@@ -2679,6 +2775,10 @@
         try { cleanup(); } catch (_) {}
       });
       this.flowViewCleanups = [];
+      this.sequenceCleanups.forEach((cleanup) => {
+        try { cleanup(); } catch (_) {}
+      });
+      this.sequenceCleanups = [];
       this.codeEditors.forEach((view) => {
         try { view.destroy(); } catch (_) {}
       });
@@ -3250,6 +3350,161 @@
       this.render();
     }
 
+    initSequenceEditors() {
+      const hosts = Array.from(this.root.querySelectorAll("[data-sequence-editor]"));
+      if (!hosts.length) return;
+      ensureLinesAndArrows().then(() => {
+        hosts.forEach((host) => {
+          if (host.isConnected) this.initSequenceEditor(host);
+        });
+      }).catch((error) => {
+        hosts.forEach((host) => {
+          if (host.isConnected) this.showSequenceFallback(host, error);
+        });
+      });
+    }
+
+    initSequenceEditor(host) {
+      const context = this.contextFromNode(host);
+      if (!context || context.questionDef.type !== "sequence") return;
+      const diagram = document.createElement("lines-and-arrows");
+      diagram.setAttribute("mode", "edit");
+      diagram.setAttribute("theme", this.theme);
+      diagram.setAttribute("branding", "true");
+      diagram.setAttribute("copy-source", "false");
+      diagram.setAttribute("canvas-background", "transparent");
+      diagram.setAttribute("label", context.questionDef.prompt);
+      let active = true;
+      const cleanup = () => {
+        if (!active) return;
+        active = false;
+        diagram.removeEventListener("la-change", onChange);
+        diagram.removeEventListener("la-error", onError);
+      };
+      const onChange = (event) => {
+        const source = event && event.detail && event.detail.source;
+        if (typeof source !== "string" || !source.trim()) return;
+        context.answer.source = source;
+        context.answer.confirmed = true;
+        this.activateContext(context);
+        this.refreshSequenceResponse(context);
+        this.markChanged(context.answer, true);
+      };
+      const onError = (event) => {
+        const detail = event && event.detail;
+        const error = detail && (detail.error || detail.message) || detail || new Error("Lines & Arrows could not render this source.");
+        cleanup();
+        this.showSequenceFallback(host, error);
+      };
+      diagram.addEventListener("la-change", onChange);
+      diagram.addEventListener("la-error", onError);
+      host.replaceChildren(diagram);
+      try {
+        let canonicalSource = normalizeSequenceSource(context.questionDef.canonicalSource);
+        if (!canonicalSource) {
+          diagram.source = context.questionDef.source;
+          canonicalSource = normalizeSequenceSource(diagram.source);
+          if (!canonicalSource) throw new Error("The proposed sequence source is empty.");
+          Object.defineProperty(context.questionDef, "canonicalSource", {
+            configurable: true,
+            writable: true,
+            value: canonicalSource
+          });
+        }
+        const matchesAuthoredSource = normalizeSequenceSource(context.answer.source) === normalizeSequenceSource(context.questionDef.source);
+        diagram.source = matchesAuthoredSource ? canonicalSource : context.answer.source;
+        const currentSource = normalizeSequenceSource(diagram.source);
+        if (!currentSource) throw new Error("The sequence source is empty.");
+        context.answer.source = matchesAuthoredSource ? canonicalSource : currentSource;
+      } catch (error) {
+        cleanup();
+        this.showSequenceFallback(host, error);
+        return;
+      }
+      this.refreshSequenceResponse(context);
+      this.scheduleExport();
+      this.sequenceCleanups.push(cleanup);
+    }
+
+    showSequenceFallback(host, error) {
+      const context = this.contextFromNode(host);
+      const card = host.closest("[data-sequence]");
+      const fallback = card && card.querySelector("[data-input='sequence-source']");
+      const errorNode = card && card.querySelector("[data-sequence-error]");
+      host.hidden = true;
+      if (fallback) {
+        fallback.hidden = false;
+        fallback.value = context && context.answer && context.answer.source || fallback.value;
+      }
+      if (errorNode) {
+        const message = error && error.message ? ` ${error.message}` : "";
+        const fallbackMessage = `Visual sequence editor unavailable; using the source editor.${message}`;
+        errorNode.dataset.fallbackMessage = fallbackMessage;
+        errorNode.textContent = fallbackMessage;
+        errorNode.hidden = false;
+      }
+      const validation = validateSequenceSource(context && context.answer && context.answer.source);
+      if (context && !validation.valid) {
+        context.answer.confirmed = false;
+        this.refreshSequenceResponse(context);
+        if (fallback) this.refreshSequenceFallbackError(fallback, validation);
+        this.save();
+        this.scheduleExport();
+      }
+    }
+
+    refreshSequenceFallbackError(input, validation) {
+      const card = input && input.closest("[data-sequence]");
+      const errorNode = card && card.querySelector("[data-sequence-error]");
+      if (!errorNode) return;
+      const fallbackMessage = errorNode.dataset.fallbackMessage || "Using the sequence source editor.";
+      errorNode.textContent = validation.valid
+        ? fallbackMessage
+        : `${fallbackMessage} ${validation.message}`;
+      errorNode.hidden = false;
+    }
+
+    confirmSequence(context) {
+      if (!context || context.questionDef.type !== "sequence") return;
+      const validation = validateSequenceSource(context.answer.source);
+      if (!validation.valid) {
+        context.answer.confirmed = false;
+        this.refreshSequenceResponse(context);
+        const section = this.sectionForContext(context);
+        const input = section && section.querySelector("[data-input='sequence-source']");
+        if (input && !input.hidden) this.refreshSequenceFallbackError(input, validation);
+        return this.toast(validation.message);
+      }
+      context.answer.confirmed = true;
+      this.activateContext(context);
+      this.refreshSequenceResponse(context);
+      this.markChanged(context.answer);
+    }
+
+    refreshSequenceResponse(context) {
+      if (!context || context.questionDef.type !== "sequence") return;
+      const section = this.sectionForContext(context);
+      if (!section) return;
+      const status = section.querySelector("[data-sequence-status]");
+      if (status) {
+        status.textContent = context.answer.confirmed
+          ? isSequenceChanged(context.questionDef, context.answer) ? "Sequence updated." : "Sequence confirmed as proposed."
+          : "Correct the sequence visually, or confirm the proposal.";
+      }
+      const actions = section.querySelector("[data-sequence-actions]");
+      const confirm = actions && actions.querySelector("[data-action='sequence-confirm']");
+      if (context.answer.confirmed) {
+        confirm?.remove();
+      } else if (actions && !confirm) {
+        const button = document.createElement("button");
+        button.className = "ih-btn";
+        button.type = "button";
+        button.dataset.action = "sequence-confirm";
+        button.textContent = "Confirm as proposed";
+        actions.prepend(button);
+      }
+    }
+
     initCodeEditors() {
       this.root.querySelectorAll("[data-code-editor]").forEach((host) => this.initCodeEditor(host));
     }
@@ -3630,6 +3885,17 @@
     return visNetworkPromise;
   }
 
+  function ensureLinesAndArrows() {
+    if (global.customElements && global.customElements.get("lines-and-arrows")) return Promise.resolve();
+    if (linesAndArrowsPromise) return linesAndArrowsPromise;
+    linesAndArrowsPromise = import(LINES_AND_ARROWS_URL).then(async () => {
+      if (!global.customElements) throw new Error("Custom elements are unavailable.");
+      await global.customElements.whenDefined("lines-and-arrows");
+      if (!global.customElements.get("lines-and-arrows")) throw new Error("Lines & Arrows did not register its editor.");
+    });
+    return linesAndArrowsPromise;
+  }
+
   async function loadCodeMirror(lang) {
     if (!codeMirrorPromise) codeMirrorPromise = import(CODEMIRROR_URL);
     if (!codeMirrorThemePromise) codeMirrorThemePromise = import(CODEMIRROR_THEME_URL);
@@ -3779,6 +4045,7 @@
       answer.buckets && answer.buckets[entry.id] || String(optionComment(answer, entry.id)).trim()
     )),
     flow: (_questionDef, answer) => Boolean(answer.confirmed),
+    sequence: (_questionDef, answer) => Boolean(answer.confirmed),
     edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
   };
 
@@ -3926,6 +4193,34 @@
 
   function isFlowStructurallyChanged(questionDef, answer) {
     return JSON.stringify(flowStructureSnapshot(answer)) !== JSON.stringify(flowStructureSnapshot(initialFlowAnswer(questionDef)));
+  }
+
+  function normalizeSequenceSource(value) {
+    return String(value || "").replace(/\r\n?/g, "\n").trim();
+  }
+
+  function validateSequenceSource(value) {
+    const source = normalizeSequenceSource(value);
+    if (!source) return { valid: false, message: "Sequence source is required." };
+    if (!global.customElements || !global.customElements.get("lines-and-arrows")) {
+      return { valid: true };
+    }
+    try {
+      const probe = global.document.createElement("lines-and-arrows");
+      probe.source = source;
+      if (!normalizeSequenceSource(probe.source)) {
+        return { valid: false, message: "Sequence source is required." };
+      }
+      return { valid: true };
+    } catch (error) {
+      const message = error && error.message ? error.message : "The sequence source is invalid.";
+      return { valid: false, message };
+    }
+  }
+
+  function isSequenceChanged(questionDef, answer) {
+    const baseline = questionDef && (questionDef.canonicalSource || questionDef.source);
+    return normalizeSequenceSource(answer && answer.source) !== normalizeSequenceSource(baseline);
   }
 
   function normalizeFlowPositions(input, nodes) {

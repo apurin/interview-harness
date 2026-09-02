@@ -2,7 +2,7 @@
 
 **Turn an agent’s questions into one clear visual decision session.**
 
-Interview Harness is an authoring skill and browser library for decisions that are difficult to resolve in chat. An AI agent creates a temporary local interview with concrete options, comparisons, plans, flows, or drafts; you review them in one session and return a concise record of your selections, changes, and comments.
+Interview Harness is an authoring skill and browser library for decisions that are difficult to resolve in chat. An AI agent creates a temporary local interview with concrete options, comparisons, plans, flows, sequences, or drafts; you review them in one session and return a concise record of your selections, changes, and comments.
 
 ![Interview Harness showing layout choices, contextual comments, technology comparison, release planning, and flow editing](assets/interview-harness-demo.gif)
 
@@ -21,10 +21,11 @@ A single interview can combine several forms of review:
 | `choice` | Select one or several options from plain or visual cards |
 | `compare` | Evaluate alternatives against shared criteria |
 | `categorize` | Organize items into buckets using board or table views |
-| `flow` | Review and correct a proposed process or journey |
+| `flow` | Review and correct proposed states, decisions, and transitions |
+| `sequence` | Review and correct a proposed exchange between participants |
 | `edit` | Revise a proposed text or code artifact |
 
-Cards can include Markdown, labels, tooltips, and inline or file-based previews. Comments can be attached to options, comparison criteria, buckets, flow elements, and edits—including items you do not select.
+Cards can include Markdown, labels, tooltips, and inline or file-based previews. Comments can be attached to options, comparison criteria, buckets, flow elements, sequences, and edits—including items you do not select.
 
 The library handles layout, navigation, progress, selection, editing, local state, Light and Dark themes, and concise text export. The generated file contains the interview content and loads the exact runtime version used to create it.
 

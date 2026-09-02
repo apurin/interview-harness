@@ -1,6 +1,6 @@
 ---
 name: interview-harness-min
-description: Create a local visual interview from already-planned questions using choices, comparisons, categorization, flow correction, and artifact editing.
+description: Create a local visual interview from already-planned questions using choices, comparisons, categorization, flow and sequence correction, and artifact editing.
 ---
 
 # Interview Harness
@@ -84,18 +84,60 @@ Each criterion has one positional value per card. A value is Markdown text or `{
 
 ### Flow
 
+Use flow to correct topology: meaningful stages, states, decisions, and allowed transitions. Nodes represent states or decision points; connections express a transition, branch, loop, or convergence. Use edit for an unbranched procedure and sequence for messages between participants.
+
 ```js
 {
   type: "flow",
-  prompt: "Correct this proposed journey.",
+  prompt: "Correct this proposed approval topology.",
   connections: [
-    { from: "Start", to: "Review" },
-    { from: "Review", to: "Finish", label: "approved" }
+    { from: "Draft", to: "Review" },
+    { from: "Review", to: "Approved", label: "accepted" },
+    { from: "Review", to: "Draft", label: "changes requested" }
   ]
 }
 ```
 
-Omit a connection label when it adds no meaning.
+Label connections when the label distinguishes a transition or decision outcome.
+
+### Sequence
+
+Use sequence when the respondent can correct a proposed exchange between two or more participants and those corrections will change the work. The diagram must expose an interaction fact they own: who sends or receives, message order, a reply or delivery outcome, timing, or a material alternative.
+
+Keep one bounded exchange readable at a glance. Use edit for a numbered procedure or single-role checklist, flow for stages or states, and compare for competing interaction designs.
+
+```js
+{
+  type: "sequence",
+  prompt: "Correct the proposed job completion, failure, and retry interaction.",
+  source: `@Client
+@API
+@Worker
+
+Client -> API: Start job
+API -> Worker: Run job
+choice Result
+  | completed
+    Worker --> API: Job complete
+    API --> Client: Job complete
+  | delivery failed
+    Worker ->x API: Deliver result
+    gap Before retry
+    API -> Worker: Retry job`
+}
+```
+
+Write stable Lines & Arrows source:
+
+- Declare each participant once at the start as `@Name`, in the intended left-to-right order. Reuse each name exactly in messages.
+- Write messages in timeline order as `Sender -> Receiver: Action`. Use `-->` consistently for replies or completions and `->x` only when delivery fails.
+- Start a material group with a lowercase type and optional label, such as `choice Result` or `parallel Gather data`. `gap` is reserved for time jumps; every other lowercase group type is valid.
+- Prefer familiar types such as `choice`, `parallel`, `optional`, `repeat`, and `critical` when they describe the interaction clearly.
+- An indented `| label` starts a section, such as a choice outcome or parallel branch. Choose exactly one form at each group level: direct items or `|` sections.
+- Indent every child level with exactly two spaces. Every group and section contains an item.
+- Keep each displayed label line to 32 characters. Put literal `\n` inside a label for its next displayed line.
+- Use `gap Label` for a meaningful time jump or omitted interval.
+- Include participant interactions that matter to the decision. Put internal implementation detail in supporting context and split long end-to-end journeys into separate exchanges.
 
 ### Edit
 
