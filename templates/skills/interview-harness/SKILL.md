@@ -17,40 +17,40 @@ Inspect the conversation, files, prior decisions, and available context first. A
 2. **User-owned:** it concerns the user's intent, preferences, constraints, risk tolerance, or desired outcome.
 3. **Material:** plausible answers would change the work or prevent costly rework.
 
-Delete any question unless you can complete: “After this answer, I will do ___ differently.”
+For each candidate question, privately complete: “With answer A, I would do ___; with answer B, I would do ___.” Keep it when that difference is worth the user's effort to answer.
 
 ## Plan the Complete Session
 
-Include every important question that passes the gate and can be answered meaningfully now. Do not impose a question limit or split known questions across sessions.
+Identify the desired outcome and hard constraints, then the unresolved decisions that could change the work. Consider the strongest viable alternative to the current plan and which unknown preference could make it better. Prioritize consequential differences, costly rework, and decisions that constrain later choices.
 
-Use one question per decision area. A static interview does not branch: defer a downstream question only when its meaningful options depend on an earlier answer. Order foundational constraints and consequential choices before details.
+Look for a governing objective or assumption behind several candidate questions. Ask about it once and carry forward the implications that actually follow. Keep independently variable preferences separately answerable. Each question asks for one coherent judgment.
 
-## Decompose UI Design Decisions
-
-When the user has not already established the UI direction, help them compose it from independent decisions instead of asking them to choose between complete designs that bundle unrelated choices.
-
-- Separate macro layout and information hierarchy, the design of consequential regions or controls, and the overall visual language into different questions.
-- Vary one concern at a time while holding the others reasonably constant. Compare layouts using the same content and neutral styling; compare a panel or control in the same surrounding context; compare visual styles using the same layout, components, and content.
-- Give a region or control its own question when its alternatives would materially change usability, navigation, density, or workflow. Do not ask about incidental details or decisions already established by the user.
-- Present meaningfully different approaches, not minor cosmetic variations. For visual language, usually offer three to five distinct directions that coordinate typography, color, density, boundaries, surfaces, and imagery or iconography.
-- Use realistic content and account for overflow, empty, selected, and dense states whenever those states could affect the decision.
-- Order questions by dependency rather than following a fixed sequence. Establish decisions that constrain later previews first; keep unconstrained aspects neutral.
-- Before presenting the interview, confirm that selections from separate questions can form a coherent interface. If two choices only work as a package, combine them into one decision or make the dependency explicit.
-
-A holistic design comparison is appropriate only when the complete concept is itself the material decision and its parts cannot be evaluated independently.
+Include every important, currently answerable decision once. Let coverage determine the question count. Order questions by dependency; the interview is static, so defer questions whose meaningful alternatives depend on an earlier answer. The session should provide enough direction to proceed, with remaining uncertainty handled through safe inference or later evidence.
 
 ## Author Strong Questions
 
-Prefer concrete candidates, comparisons, proposed scope, flows, and editable drafts over recall from a blank prompt.
+- **Ask in the user's terms.** Name the situation and the decision in plain language, matching the respondent's expertise. Ask about consequences they can judge; derive implementation details from established intent.
+- **Match the evidence needed.** When learning current behavior, request a scoped recent example, such as “Walk me through the last report you published, from preparation to sharing.” When establishing desired behavior, offer a concrete proposal or alternatives to choose or correct. Ground workflow proposals in the available evidence.
+- **Choose the easiest useful response.** Use `choice` for a preference, `compare` for competing consequences, `categorize` for applying a shared distinction across items, and `flow`, `sequence`, or `edit` for correcting a coherent proposal. Choose the type that resolves the decision with the least effort.
+- **Make every alternative earn its place.** Present the smallest set of feasible options that represents materially different approaches. Every option answers the same question at the same level of abstraction. Use comparable detail and realistic content under shared assumptions.
+- **Expose the deciding differences.** Compare options against the same few user-relevant criteria, in the same order. Keep a criterion when its variation could change the choice. State shared facts once. Foreground what the user gains, what it costs, and what it requires; keep decisive uncertainty and assumptions visible. Use `markdownTooltip` for supporting evidence, definitions, and secondary detail.
+- **Make advice conditional and correctable.** Use `tags: ["Recommended"]` when established user goals support a clear recommendation, and give its reason beside the label. When the preferred option depends on an unknown priority, ask about the tradeoff. Use comments for local qualifications, combinations, and missing alternatives, and editable proposals for direct correction.
 
-- Present meaningfully different options with comparable detail and clear consequences.
-- Keep prompts specific about what the answer will steer.
-- Include only context needed to answer; keep research notes and extended reasoning elsewhere.
-- Mark a clear recommendation with `tags: ["Recommended"]`.
-- Treat question types as alternatives, not a checklist.
-- Do not create a question merely to display information.
+For example, “When should a submitted report become visible to teammates?” can compare immediate publication with publication after approval. Show availability, review work, and the consequence to accept for each. That policy steers the publication flow and permissions; the identity of the reviewer remains separately answerable when material.
 
-Users can comment on cards, columns, criteria, flows, sequences, and edits, including options they do not select. They can use comments for nuance, combinations, and parts to borrow from declined options.
+## Decompose UI Design Decisions
+
+When UI direction is open, help the user compose it from independently answerable decisions.
+
+- Separate macro layout and information hierarchy, the design of consequential regions or controls, and the overall visual language into different questions.
+- Vary one concern at a time while holding the others reasonably constant. Compare layouts using the same content and neutral styling; compare a panel or control in the same surrounding context; compare visual styles using the same layout, components, and content.
+- Give a region or control its own question when its alternatives pass the gate and would materially change usability, navigation, density, or workflow.
+- For visual language, offer distinct directions that coordinate typography, color, density, boundaries, surfaces, and imagery or iconography. Let meaningful differences determine the option count.
+- Use realistic content and account for overflow, empty, selected, and dense states whenever those states could affect the decision.
+- Establish decisions that constrain later previews first; keep unconstrained aspects neutral.
+- Before presenting the interview, confirm that selections from separate questions can form a coherent interface. If two choices only work as a package, combine them into one decision or make the dependency explicit.
+
+A holistic design comparison is appropriate when the complete concept is itself the material decision and its parts depend on one another.
 
 ## Authoring API
 
@@ -221,4 +221,4 @@ An edit question must contain one cohesive artifact that the user can revise ind
 </html>
 ```
 
-Before presenting the path, confirm every question passes the gate, all currently answerable material decisions are included, and no question duplicates another or depends on an answer the session cannot know.
+Before presenting the path, confirm every question passes the gate, each currently answerable material decision is covered once, alternatives are comparable, and the session can be answered coherently with the context available. Keep research notes and extended rationale outside the interview.
