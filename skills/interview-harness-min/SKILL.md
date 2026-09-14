@@ -5,7 +5,7 @@ description: Create a local visual interview from already-planned questions usin
 
 # Interview Harness
 
-Create one local HTML interview that lets the user select, comment on, correct, and refine generated material. Load the harness from `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v6.0.0/interview-harness.js`. This skill is the complete authoring reference; do not read or copy the library source.
+Create one local HTML interview that lets the user select, comment on, correct, and refine generated material. Load the harness from `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v6.0.1/interview-harness.js`. This skill is the complete authoring reference; do not read or copy the library source.
 
 Save the page as a `.html` file and present its path. The user can open it directly in a browser. Do not host it or start a server.
 
@@ -163,7 +163,7 @@ An edit question must contain one cohesive artifact that the user can revise ind
     <title>Interview title</title>
   </head>
   <body>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v6.0.0/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v6.0.1/interview-harness.js"></script>
     <script>
       InterviewHarness.mount({
         title: "Interview title",
