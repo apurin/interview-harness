@@ -876,9 +876,14 @@
     .ih-frame { display: block; width: 100%; height: min(54vh, 520px); border: 0; background: var(--ih-surface-2); }
     .ih-frame-shell.is-phone { overflow: visible; display: grid; gap: 10px; background: transparent; }
     .ih-frame-shell.is-phone > .ih-frame-bar { border-bottom: 0; border-radius: var(--ih-radius); }
-    .ih-phone-fit { min-width: 0; width: 100%; display: flex; justify-content: center; }
-    .ih-phone { flex: 0 0 auto; align-self: flex-start; padding: 10px; border: 1px solid var(--ih-line-strong); border-radius: 50px; background: #15191a; box-shadow: var(--ih-shadow); transform: scale(var(--ih-phone-scale, 1)); transform-origin: top center; }
+    /* The phone is 412x802: a 390x780 viewport, a 10px bezel, and a 1px edge. initPhoneFrames scales it to the fit box. */
+    .ih-phone-fit { width: min(100%, 412px); min-width: 0; min-height: 0; aspect-ratio: 412 / 802; margin-inline: auto; }
+    .ih-phone { width: max-content; padding: 10px; border: 1px solid var(--ih-line-strong); border-radius: 50px; background: #15191a; box-shadow: var(--ih-shadow); transform: scale(var(--ih-phone-scale, 1)); transform-origin: top left; }
     .ih-phone > iframe { display: block; width: 390px; height: 780px; border: 0; border-radius: 40px; background: #fff; }
+    /* Narrow phone boards keep phones at about 70% scale or more and give spare width to the phones, not the criteria. */
+    .ih-evaluation-board[data-preview-frame="phone"][data-column-width="narrow"] { --ih-evaluation-column-width: 312px; }
+    .ih-evaluation-board[data-preview-frame="phone"] .ih-evaluation-table { --ih-evaluation-feature-width: 240px; }
+    .ih-bucket-overflow[data-preview-frame="phone"][data-column-width="narrow"] { --ih-bucket-column-width: 328px; }
     .ih-bucket-board:has(.is-dragging) iframe { pointer-events: none; }
     .ih-html-preview { overflow: auto; }
     .ih-html-preview > svg { display: block; width: 100%; height: auto; }
@@ -901,7 +906,6 @@
     }
     .ih-evaluation-board[data-column-width="medium"] { --ih-evaluation-column-width: 460px; }
     .ih-evaluation-board[data-column-width="wide"] { --ih-evaluation-column-width: 680px; }
-    .ih-evaluation-board[data-preview-frame="phone"][data-column-width="narrow"] { --ih-evaluation-column-width: 440px; }
     .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
     .ih-evaluation-header-frame {
@@ -1704,7 +1708,7 @@
   function renderEvaluation(questionDef, answer, instance) {
     const selectedIds = asArray(answer.selected ? [answer.selected] : []);
     const body = [];
-    if (questionDef.previewFrame && questionDef.options.some((entry) => entry.htmlPreview)) body.push(renderEvaluationPreviewRow(questionDef, selectedIds));
+    if (hasPhonePreviews(questionDef)) body.push(renderEvaluationPreviewRow(questionDef, selectedIds));
     let previousGroup = null;
     questionDef.rows.forEach((row) => {
       if (row.group && row.group !== previousGroup) {
@@ -1714,7 +1718,7 @@
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
     });
     return `
-      <div class="ih-evaluation-board"${renderColumnFrameAttrs(questionDef, instance)}${questionDef.previewFrame ? ` data-preview-frame="${escapeAttr(questionDef.previewFrame)}"` : ""}>
+      <div class="ih-evaluation-board"${renderColumnFrameAttrs(questionDef, instance)}>
         <div class="ih-evaluation-head">
           <p class="ih-evaluation-note">Select one column. Comment on columns or criteria when the comparison needs clarification.</p>
           ${renderColumnHints()}
@@ -1758,7 +1762,7 @@
   // Phone previews are too tall for the sticky column header, so they get the first body row.
   function renderEvaluationPreviewRow(questionDef, selectedIds) {
     const cells = questionDef.options.map((optionDef) => {
-      return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column`)}>${renderCardContent(Object.assign({}, optionDef, { markdown: "" }), questionDef.previewFrame)}</td>`;
+      return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column`)}>${optionDef.previewType === "none" ? "" : renderPhonePreview(optionDef)}</td>`;
     }).join("");
     return `<tr class="ih-evaluation-preview-row"><th><div class="ih-evaluation-row-title"><span>Preview</span></div></th>${cells}</tr>`;
   }
@@ -1866,7 +1870,8 @@
   function renderColumnFrameAttrs(questionDef, instance) {
     const width = instance.columnWidth(questionDef.id);
     const fit = width !== "narrow" && !instance.hasColumnWidthChoice(questionDef.id);
-    return ` data-column-overflow data-column-width="${escapeAttr(width)}"${fit ? ` data-column-fit="${escapeAttr(width)}"` : ""}`;
+    const phone = hasPhonePreviews(questionDef) ? ` data-preview-frame="phone"` : "";
+    return ` data-column-overflow data-column-width="${escapeAttr(width)}"${fit ? ` data-column-fit="${escapeAttr(width)}"` : ""}${phone}`;
   }
 
   function renderColumnHints() {
@@ -2197,6 +2202,10 @@
     return cards.some((card) => card.markdown) ? "auto" : "stack";
   }
 
+  function hasPhonePreviews(questionDef) {
+    return Boolean(questionDef.previewFrame) && questionDef.options.some((card) => card.previewType !== "none");
+  }
+
   function columnFrameView(frame) {
     const rect = frame.getBoundingClientRect();
     const left = rect.left + frame.clientLeft;
@@ -2224,31 +2233,69 @@
   function renderCardContent(card, previewFrame) {
     const parts = [];
     if (card.markdown) parts.push(`<div class="ih-rich ih-markdown">${renderMarkdown(card.markdown)}</div>`);
-    if (card.previewType === "inline") parts.push(previewFrame ? renderSrcdocPreview(card) : `<div class="ih-html-preview">${card.htmlPreview}</div>`);
-    if (card.previewType === "file") parts.push(renderFilePreview(card, previewFrame));
+    if (card.previewType !== "none" && previewFrame) parts.push(renderPhonePreview(card));
+    else if (card.previewType === "inline") parts.push(`<div class="ih-html-preview">${card.htmlPreview}</div>`);
+    else if (card.previewType === "file") parts.push(renderFilePreview(card));
     return parts.join("");
   }
 
-  function renderFilePreview(card, previewFrame) {
-    const src = card.htmlPreview.slice("file:".length).trim();
-    const sourceName = frameSourceName(src) || card.title;
-    const frame = `<iframe class="ih-frame" title="${escapeAttr(card.title)}" src="${escapeAttr(src)}"></iframe>`;
-    return `<div class="ih-frame-shell${previewFrame ? " is-phone" : ""}">
-      <div class="ih-frame-bar">
-        <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
-        <a class="ih-frame-open" href="${escapeAttr(src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>
-      </div>
-      ${previewFrame ? renderPhoneFrame(frame) : frame}
+  function filePreviewSource(card) {
+    return card.htmlPreview.slice("file:".length).trim();
+  }
+
+  function renderFilePreview(card) {
+    const src = filePreviewSource(card);
+    return `<div class="ih-frame-shell">
+      ${renderFrameBar(card, src)}
+      <iframe class="ih-frame" title="${escapeAttr(card.title)}" src="${escapeAttr(src)}"></iframe>
     </div>`;
   }
 
-  function renderSrcdocPreview(card) {
-    const html = /^\s*<!doctype/i.test(card.htmlPreview) ? card.htmlPreview : `<!doctype html>${card.htmlPreview}`;
-    return renderPhoneFrame(`<iframe title="${escapeAttr(card.title)}" srcdoc="${escapeAttr(html)}"></iframe>`);
+  function renderFrameBar(card, src) {
+    const sourceName = frameSourceName(src) || card.title;
+    return `<div class="ih-frame-bar">
+      <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
+      <a class="ih-frame-open" href="${escapeAttr(src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>
+    </div>`;
   }
 
-  function renderPhoneFrame(iframe) {
-    return `<div class="ih-phone-fit"><div class="ih-phone">${iframe}</div></div>`;
+  // Shows a preview in a 390x780 phone viewport. Inline HTML becomes a srcdoc document; it is author content like
+  // the rest of the page, so it is not sandboxed. It gets no open link: a new tab would lose the phone viewport.
+  function renderPhonePreview(card) {
+    const src = card.previewType === "file" ? filePreviewSource(card) : "";
+    const srcdoc = /^\s*<!doctype/i.test(card.htmlPreview) ? card.htmlPreview : `<!doctype html>${card.htmlPreview}`;
+    const source = src ? `src="${escapeAttr(src)}"` : `srcdoc="${escapeAttr(srcdoc)}"`;
+    const phone = `<div class="ih-phone-fit"><div class="ih-phone"><iframe title="${escapeAttr(card.title)}" ${source}></iframe></div></div>`;
+    return src ? `<div class="ih-frame-shell is-phone">${renderFrameBar(card, src)}${phone}</div>` : phone;
+  }
+
+  // The fit box takes the scaled phone's size from CSS, so scaling never resizes what the ResizeObserver watches.
+  function fitPhone(fit) {
+    const scale = Math.min(1, fit.clientWidth / fit.firstElementChild.offsetWidth) || 1;
+    fit.style.setProperty("--ih-phone-scale", String(scale));
+  }
+
+  // A srcdoc preview resolves "#id" links, empty links, and action-less forms against the interview's URL, so following
+  // one would load the interview or a blank page inside the phone. Keep that navigation inside the preview.
+  function keepSrcdocNavigationInFrame(frame) {
+    const doc = frame.contentDocument;
+    if (!doc || doc.URL !== "about:srcdoc") return;
+    const staysOnPage = (url) => /^about:/i.test(url) || url.split("#")[0] === doc.baseURI.split("#")[0];
+    doc.addEventListener("click", (event) => {
+      const link = event.target.closest && event.target.closest("a[href]");
+      if (!link || typeof link.href !== "string" || event.defaultPrevented || !staysOnPage(link.href)) return;
+      event.preventDefault();
+      let id = new URL(link.href).hash.slice(1);
+      try { id = decodeURIComponent(id); } catch (_) {}
+      const target = id && doc.getElementById(id);
+      if (target) target.scrollIntoView();
+      else if (!id || /^top$/i.test(id)) frame.contentWindow.scrollTo(0, 0);
+    });
+    doc.addEventListener("submit", (event) => {
+      const form = event.target;
+      if (event.defaultPrevented || /^dialog$/i.test(form.getAttribute("method") || "")) return;
+      if (staysOnPage(new URL(form.getAttribute("action") || "about:srcdoc", doc.baseURI).href)) event.preventDefault();
+    });
   }
 
   function renderTooltipButton(title, markdown) {
@@ -2502,6 +2549,9 @@
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
       this.root.addEventListener("focusout", (event) => this.onFocusout(event));
+      this.root.addEventListener("load", (event) => {
+        if (event.target.matches && event.target.matches(".ih-phone > iframe[srcdoc]")) keepSrcdocNavigationInFrame(event.target);
+      }, true);
       global.document.addEventListener("keydown", this.onDocumentKeydown);
       global.addEventListener("storage", this.onThemeStorage);
       this.root.addEventListener("mouseover", (event) => this.onMouseover(event));
@@ -3035,7 +3085,6 @@
       });
       this.columnFrameCleanups = [];
       if (this.phoneFrameObserver) this.phoneFrameObserver.disconnect();
-      this.phoneFrameObserver = null;
       this.frameObjectUrls.forEach((url) => {
         try { global.URL.revokeObjectURL(url); } catch (_) {}
       });
@@ -3062,19 +3111,12 @@
     }
 
     initPhoneFrames() {
-      const fits = Array.from(this.root.querySelectorAll(".ih-phone-fit"));
-      if (!fits.length) return;
-      // Scale the fixed-size phone down to its container; the iframe keeps its 390px viewport.
-      const fit = (element) => {
-        const phone = element.firstElementChild;
-        const scale = Math.min(1, element.clientWidth / phone.offsetWidth) || 1;
-        element.style.setProperty("--ih-phone-scale", String(scale));
-        element.style.height = scale < 1 ? `${phone.offsetHeight * scale}px` : "";
-      };
-      fits.forEach(fit);
-      if (!global.ResizeObserver) return;
-      this.phoneFrameObserver = new global.ResizeObserver((entries) => entries.forEach((entry) => fit(entry.target)));
-      fits.forEach((element) => this.phoneFrameObserver.observe(element));
+      const fits = this.root.querySelectorAll(".ih-phone-fit");
+      fits.forEach(fitPhone);
+      if (!fits.length || !global.ResizeObserver) return;
+      // One observer per instance: destroyEnhancements disconnects it, so repeated renders cannot stack observers.
+      if (!this.phoneFrameObserver) this.phoneFrameObserver = new global.ResizeObserver((entries) => entries.forEach((entry) => fitPhone(entry.target)));
+      fits.forEach((fit) => this.phoneFrameObserver.observe(fit));
     }
 
     fitColumns(board) {
