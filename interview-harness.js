@@ -1079,7 +1079,13 @@
     .ih-bucket-overflow > .ih-column-hints { margin-bottom: 8px; }
     .ih-bucket-frame { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
     .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: calc((var(--ih-bucket-count, 1) * var(--ih-bucket-column-width)) + ((var(--ih-bucket-count, 1) - 1) * 12px)); }
-    .ih-bucket { flex: 1 0 var(--ih-bucket-column-width); min-width: 0; display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    .ih-bucket { container: ih-bucket / inline-size; flex: 1 0 var(--ih-bucket-column-width); min-width: 0; display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    @container ih-bucket (max-width: 320px) {
+      .ih-bucket-card { grid-template-columns: 20px minmax(0, 1fr); row-gap: 4px; }
+      .ih-bucket-card > .ih-grip { grid-row: 1 / span 2; }
+      .ih-bucket-card > .ih-bucket-actions { grid-column: 2; grid-row: 2; justify-self: start; margin-left: -4px; }
+      .ih-bucket-card-content { grid-row: 3; margin-top: 4px; }
+    }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
@@ -1097,8 +1103,8 @@
       opacity: 0;
       transition: opacity .16s ease;
     }
-    .ih-column-edges::before { left: var(--ih-column-edge-start, 0px); background: linear-gradient(to right, color-mix(in srgb, var(--ih-ink) 14%, transparent), transparent 8px), linear-gradient(to right, var(--ih-column-fade), transparent); }
-    .ih-column-edges::after { right: 0; background: linear-gradient(to left, color-mix(in srgb, var(--ih-ink) 14%, transparent), transparent 8px), linear-gradient(to left, var(--ih-column-fade), transparent); }
+    .ih-column-edges::before { left: var(--ih-column-edge-start, 0px); background: linear-gradient(to right, rgb(8 14 13 / 16%), transparent 8px), linear-gradient(to right, var(--ih-column-fade), transparent); }
+    .ih-column-edges::after { right: 0; background: linear-gradient(to left, rgb(8 14 13 / 16%), transparent 8px), linear-gradient(to left, var(--ih-column-fade), transparent); }
     .ih-column-edges.is-overflow-start::before,
     .ih-column-edges.is-overflow-end::after { opacity: 1; }
     .ih-column-hints { display: flex; flex-wrap: wrap; justify-content: end; gap: 6px; }
@@ -2209,6 +2215,18 @@
     };
   }
 
+  // Scrolls a compare column clear of the sticky criteria column and the right edge.
+  function revealColumn(frame, optionId) {
+    const view = columnFrameView(frame);
+    const column = view.columns.find((cell) => cell.dataset.optionId === optionId);
+    if (!column) return;
+    const rect = column.getBoundingClientRect();
+    const delta = rect.left < view.left - 1
+      ? rect.left - view.left
+      : rect.right > view.right + 1 ? Math.min(rect.right - view.right, rect.left - view.left) : 0;
+    if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
+  }
+
   function isColumnWidthQuestion(questionDef) {
     return Boolean(questionDef && ["choice", "evaluation", "bucket"].includes(questionDef.type));
   }
@@ -3046,15 +3064,40 @@
       this.root.querySelectorAll("[data-column-overflow]").forEach((board) => {
         const frame = board.querySelector("[data-column-frame]");
         if (!frame) return;
-        const update = () => this.updateColumnOverflow(board);
+        const header = board.querySelector("[data-evaluation-header-frame]");
+        let headerLeft = 0;
+        const update = () => {
+          if (header) {
+            header.scrollLeft = frame.scrollLeft;
+            headerLeft = header.scrollLeft;
+          }
+          this.updateColumnOverflow(board);
+        };
+        // Focusing a clipped column heading scrolls the header on its own; bring the body along.
+        const followHeader = () => {
+          if (Math.abs(header.scrollLeft - headerLeft) > 1) frame.scrollLeft = header.scrollLeft;
+        };
+        // Focus scrolling ignores the sticky criteria column, so reveal a focused column fully.
+        const revealFocused = (event) => {
+          const cell = event.target.closest("td[data-option-id], th[data-option-id]");
+          if (cell) requestAnimationFrame(() => revealColumn(frame, cell.dataset.optionId));
+        };
         const refit = () => {
           this.fitColumns(board);
           update();
         };
         frame.addEventListener("scroll", update, { passive: true });
+        if (header) {
+          header.addEventListener("scroll", followHeader, { passive: true });
+          board.addEventListener("focusin", revealFocused);
+        }
         global.addEventListener("resize", refit);
         this.columnFrameCleanups.push(() => {
           frame.removeEventListener("scroll", update);
+          if (header) {
+            header.removeEventListener("scroll", followHeader);
+            board.removeEventListener("focusin", revealFocused);
+          }
           global.removeEventListener("resize", refit);
         });
         refit();
@@ -3099,23 +3142,26 @@
     updateColumnOverflow(board) {
       const frame = board.querySelector("[data-column-frame]");
       const edges = board.querySelector(".ih-column-edges");
-      const header = board.querySelector("[data-evaluation-header-frame]");
       if (!frame || !edges) return;
-      if (header) header.scrollLeft = frame.scrollLeft;
       const view = columnFrameView(frame);
       const before = view.columns.filter((column) => column.getBoundingClientRect().left < view.left - 2).length;
       const after = view.columns.filter((column) => column.getBoundingClientRect().right > view.right + 2).length;
       edges.style.setProperty("--ih-column-edge-start", `${Math.round(view.left - frame.getBoundingClientRect().left)}px`);
       edges.classList.toggle("is-overflow-start", before > 0);
       edges.classList.toggle("is-overflow-end", after > 0);
-      board.querySelectorAll("[data-action='scroll-columns']").forEach((hint) => {
+      const hints = Array.from(board.querySelectorAll("[data-action='scroll-columns']"));
+      let hidFocusedHint = false;
+      hints.forEach((hint) => {
         const toStart = hint.dataset.direction === "-1";
         const count = toStart ? before : after;
         const label = `${count} more ${count === 1 ? "column" : "columns"}`;
+        if (count === 0 && hint === global.document.activeElement) hidFocusedHint = true;
         hint.hidden = count === 0;
         hint.textContent = toStart ? `← ${label}` : `${label} →`;
         hint.setAttribute("aria-label", `${label} to the ${toStart ? "left" : "right"}`);
       });
+      // Keep keyboard focus nearby when paging reaches the last column.
+      if (hidFocusedHint) (hints.find((hint) => !hint.hidden) || frame).focus({ preventScroll: true });
     }
 
     scrollColumns(hint) {
@@ -3123,27 +3169,25 @@
       const frame = board && board.querySelector("[data-column-frame]");
       if (!frame) return;
       const view = columnFrameView(frame);
+      const viewWidth = view.right - view.left;
+      const rects = view.columns.map((column) => column.getBoundingClientRect());
+      let delta = 0;
+      // Page so the next hidden column starts the view, or the previous one ends it;
+      // a column wider than the view is paged through one view at a time.
       if (hint.dataset.direction === "-1") {
-        const previous = view.columns.filter((column) => column.getBoundingClientRect().left < view.left - 2).pop();
-        if (previous) frame.scrollBy({ left: previous.getBoundingClientRect().right - view.right, behavior: "smooth" });
+        const previous = rects.filter((rect) => rect.left < view.left - 2).pop();
+        if (previous) delta = previous.right < view.right - 2 ? previous.right - view.right : Math.max(previous.left - view.left, -viewWidth);
       } else {
-        const next = view.columns.find((column) => column.getBoundingClientRect().right > view.right + 2);
-        if (next) frame.scrollBy({ left: next.getBoundingClientRect().left - view.left, behavior: "smooth" });
+        const next = rects.find((rect) => rect.right > view.right + 2);
+        if (next) delta = next.left > view.left + 2 ? next.left - view.left : Math.min(next.right - view.right, viewWidth);
       }
+      if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
     }
 
     revealEvaluationOption(context, optionId) {
       const section = this.sectionForContext(context);
       const frame = section && section.querySelector(".ih-evaluation-frame");
-      if (!frame) return;
-      const view = columnFrameView(frame);
-      const column = view.columns.find((cell) => cell.dataset.optionId === optionId);
-      if (!column) return;
-      const rect = column.getBoundingClientRect();
-      const delta = rect.left < view.left - 1
-        ? rect.left - view.left
-        : rect.right > view.right + 1 ? Math.min(rect.right - view.right, rect.left - view.left) : 0;
-      if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
+      if (frame) revealColumn(frame, optionId);
     }
 
     initFrameLinks() {
