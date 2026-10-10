@@ -321,7 +321,7 @@
     const columnWidths = Object.fromEntries(config.questions
       .filter(isColumnWidthQuestion)
       .map((questionDef) => [questionDef.id, questionDef.columnWidth || "narrow"]));
-    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths, commentEditor: null, detailPopover: null, answers };
+    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths, commentEditor: null, detailPopover: null, answers, closingNote: "" };
   }
 
   function initialAnswer(questionDef) {
@@ -345,7 +345,8 @@
         })),
       commentEditor: null,
       detailPopover: null,
-      answers: Object.assign({}, current.answers)
+      answers: Object.assign({}, current.answers),
+      closingNote: typeof saved.closingNote === "string" ? saved.closingNote : current.closingNote
     });
     if (Number.isInteger(saved.step)) next.step = Math.max(0, Math.min(saved.step, questions.length));
     questions.forEach((questionDef) => {
@@ -377,6 +378,7 @@
 
   function buildTextExport(config, state) {
     const lines = [`# ${config.title}`, ""];
+    const closingNote = String(state.closingNote || "").trim();
     let changed = false;
     config.questions.forEach((questionDef, index) => {
       const answer = state.answers[questionDef.id];
@@ -386,7 +388,8 @@
       textExporters[questionDef.type](lines, questionDef, answer);
       lines.push("");
     });
-    if (!changed) lines.push("No user changes yet.");
+    if (!changed && !closingNote) lines.push("No user changes yet.");
+    if (closingNote) lines.push("## Not covered by the questions", closingNote);
 
     return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
@@ -676,6 +679,9 @@
     .ih-kicker { margin: 0 0 8px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
     .ih-prompt { margin: 0; max-width: 980px; font-size: clamp(22px, 2.5vw, 34px); line-height: 1.12; letter-spacing: 0; }
     .ih-export-note { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
+    .ih-closing-note { display: grid; gap: 6px; margin-bottom: 14px; }
+    .ih-closing-note-help { margin: 0 0 6px; color: var(--ih-muted); line-height: 1.45; font-size: 14px; }
+    .ih-closing-note .ih-field { min-height: 88px; }
 
     .ih-btn {
       min-height: 36px;
@@ -1975,6 +1981,11 @@
             <p class="ih-export-note">Copy the answer summary for the next agent.</p>
           </div>
         </div>
+        <div class="ih-card ih-closing-note">
+          <h3 class="ih-option-title"><label for="ih-closing-note">Anything the questions didn't cover?</label></h3>
+          <p class="ih-closing-note-help" id="ih-closing-note-help">Constraints, must-haves, or anything you expected to be asked.</p>
+          <textarea class="ih-field ih-auto-field" id="ih-closing-note" data-input="closing-note" rows="3" aria-describedby="ih-closing-note-help">${escapeHTML(instance.state.closingNote || "")}</textarea>
+        </div>
         <div class="ih-card">
           <div class="ih-option-top" style="margin-bottom:12px">
             <h3 class="ih-option-title">Answer summary</h3>
@@ -2436,6 +2447,13 @@
         return;
       }
       if (kind === "flow-new-node") return;
+      if (kind === "closing-note") {
+        this.state.closingNote = input.value;
+        this.state.step = this.config.questions.length;
+        autoGrowTextarea(input);
+        this.markChanged(null, true);
+        return;
+      }
       const context = kind === "comment-modal" && this.state.commentEditor
         ? this.contextByQuestionId(this.state.commentEditor.questionId)
         : this.contextFromNode(input);
