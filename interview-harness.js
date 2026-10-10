@@ -436,23 +436,20 @@
 
   function appendBucketAnswer(lines, questionDef, answer) {
     const groups = bucketGroups(questionDef, answer);
-    questionDef.buckets.forEach((bucket) => {
-      const options = questionDef.ordered
-        ? groups.get(bucket.id)
-        : questionDef.options.filter((entry) => answer.buckets[entry.id] === bucket.id);
-      if (!options.length) return;
-      lines.push(`${bucket.title}:`);
-      options.forEach((entry, index) => {
+    // Unordered questions export in authored card order, so moving cards within a column changes nothing.
+    const entriesIn = (bucketId) => questionDef.ordered
+      ? groups.get(bucketId)
+      : questionDef.options.filter((entry) => (answer.buckets[entry.id] || "") === bucketId);
+    const appendGroup = (title, entries, numbered) => {
+      if (!entries.length) return;
+      lines.push(`${title}:`);
+      entries.forEach((entry, index) => {
         const comment = optionComment(answer, entry.id);
-        const marker = questionDef.ordered ? `${index + 1}.` : "-";
-        lines.push(`${marker} ${entry.title}${comment ? ` Comment: ${comment}` : ""}`);
+        lines.push(`${numbered ? `${index + 1}.` : "-"} ${entry.title}${comment ? ` Comment: ${comment}` : ""}`);
       });
-    });
-    const unset = questionDef.options.filter((entry) => !answer.buckets[entry.id] && optionComment(answer, entry.id));
-    if (unset.length) {
-      lines.push("Unsorted:");
-      unset.forEach((entry) => lines.push(`- ${entry.title}`));
-    }
+    };
+    questionDef.buckets.forEach((bucket) => appendGroup(bucket.title, entriesIn(bucket.id), questionDef.ordered));
+    appendGroup("Unsorted", entriesIn("").filter((entry) => optionComment(answer, entry.id)), false);
   }
 
   function appendEditAnswer(lines, questionDef, answer) {
@@ -1045,6 +1042,11 @@
     .ih-bucket-card > .ih-bucket-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
     .ih-bucket-card-content { grid-column: 1 / -1; grid-row: 2; min-width: 0; width: 100%; display: grid; gap: 8px; }
     .ih-bucket-card.is-dragging { opacity: .55; }
+    /* In narrow columns the title gets its own row instead of squeezing between the grip and actions. */
+    @container ih-bucket-list (max-width: 279px) {
+      .ih-bucket-card > .ih-option-title { grid-column: 1 / -1; grid-row: 2; }
+      .ih-bucket-card-content { grid-row: 3; }
+    }
     .ih-bucket-position {
       display: inline-grid;
       place-items: center;
@@ -1081,7 +1083,7 @@
     .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: calc((var(--ih-bucket-count, 1) * var(--ih-bucket-column-width)) + ((var(--ih-bucket-count, 1) - 1) * 12px)); }
     .ih-bucket { flex: 1 0 var(--ih-bucket-column-width); min-width: 0; display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
-    .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
+    .ih-bucket-list { container: ih-bucket-list / inline-size; display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
     .ih-bucket-view-toolbar { display: flex; justify-content: end; align-self: end; }
     .ih-column-edges { position: relative; }
@@ -1203,8 +1205,8 @@
     .ih-bucket-reorder[hidden] { display: none; }
     .ih-app .ih-bucket-reorder-button { background: transparent; color: color-mix(in srgb, var(--ih-muted) 82%, var(--ih-surface)); }
     .ih-bucket-reorder-button svg { width: 18px; height: 18px; display: block; }
-    .ih-app .ih-bucket-reorder-button:hover:not(:disabled) { color: color-mix(in srgb, var(--ih-accent) 56%, var(--ih-muted)); }
-    .ih-bucket-reorder-button:disabled { opacity: .38; cursor: not-allowed; }
+    .ih-app .ih-bucket-reorder-button:hover:not([aria-disabled="true"]) { color: color-mix(in srgb, var(--ih-accent) 56%, var(--ih-muted)); }
+    .ih-bucket-reorder-button[aria-disabled="true"] { opacity: .38; cursor: not-allowed; }
     .ih-bucket-table-content .ih-rich { font-size: 12px; line-height: 1.35; }
     .ih-flow { padding: 0; overflow: hidden; }
     .ih-flow-toolbar { display: grid; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--ih-line); background: var(--ih-surface-2); }
@@ -1880,28 +1882,23 @@
 
   function renderBucketBoard(questionDef, answer, instance) {
     const groups = bucketGroups(questionDef, answer);
-    const unset = groups.get("");
-
     return `
       <div class="ih-bucket-overflow"${renderColumnFrameAttrs(questionDef, instance)} style="--ih-bucket-count: ${questionDef.buckets.length + 1}">
         ${renderColumnHints()}
         <div class="ih-column-edges">
           <div class="ih-bucket-frame" data-column-frame tabindex="0" aria-label="Buckets">
             <div class="ih-bucket-board">
-              <section class="ih-bucket" data-bucket-id="">
-                <div class="ih-bucket-title">Unsorted</div>
-                <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="">
-                  ${unset.length ? unset.map((entry) => renderBucketCard(questionDef, answer, entry, 0)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText("", "board")}</div>`}
-                </div>
-              </section>
-              ${questionDef.buckets.map((bucket) => `
-                <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
-                  <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
-                  <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
-                    ${groups.get(bucket.id).length ? groups.get(bucket.id).map((entry, index) => renderBucketCard(questionDef, answer, entry, index + 1)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "board")}</div>`}
-                  </div>
-                </section>
-              `).join("")}
+              ${bucketsWithUnsorted(questionDef).map((bucket) => {
+                const entries = groups.get(bucket.id);
+                return `
+                  <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
+                    <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
+                    <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
+                      ${entries.length ? entries.map((entry, index) => renderBucketCard(questionDef, answer, entry, bucketPosition(bucket.id, index))).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "board")}</div>`}
+                    </div>
+                  </section>
+                `;
+              }).join("")}
             </div>
           </div>
         </div>
@@ -1921,14 +1918,14 @@
   function renderOrderedBucketTable(questionDef, answer) {
     const groups = bucketGroups(questionDef, answer);
     return `
-      <div class="ih-bucket-table is-ordered" aria-label="Table view">
-        ${[{ id: "", title: "Unsorted" }].concat(questionDef.buckets).map((bucket) => {
+      <div class="ih-bucket-table is-ordered" role="group" aria-label="Table view">
+        ${bucketsWithUnsorted(questionDef).map((bucket) => {
           const entries = groups.get(bucket.id);
           return `
             <section class="ih-bucket-table-group">
               <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
               <div class="ih-bucket-table-list" role="list" aria-label="${escapeAttr(bucket.title)}" data-bucket-id="${escapeAttr(bucket.id)}">
-                ${entries.length ? entries.map((entry, index) => renderBucketTableCard(questionDef, answer, entry, bucket.id ? index + 1 : 0, entries.length)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "table")}</div>`}
+                ${entries.length ? entries.map((entry, index) => renderBucketTableCard(questionDef, answer, entry, bucketPosition(bucket.id, index), entries.length)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "table")}</div>`}
               </div>
             </section>
           `;
@@ -1961,7 +1958,7 @@
   }
 
   function renderBucketStateOptions(questionDef, entry, currentBucketId) {
-    const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+    const buckets = bucketsWithUnsorted(questionDef);
     return `
       <div class="ih-bucket-state-options" role="group" aria-label="Set status for ${escapeAttr(entry.title)}">
         ${buckets.map((bucket) => {
@@ -1980,8 +1977,8 @@
   function renderBucketReorder(entry, position, count) {
     return `
       <span class="ih-bucket-reorder" data-bucket-reorder ${position ? "" : "hidden"}>
-        <button class="ih-icon-btn ih-bucket-reorder-button" type="button" data-action="reorder-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-direction="up" aria-label="Move ${escapeAttr(entry.title)} up" title="Move up" ${position > 1 ? "" : "disabled"}>${arrowIcon("up")}</button>
-        <button class="ih-icon-btn ih-bucket-reorder-button" type="button" data-action="reorder-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-direction="down" aria-label="Move ${escapeAttr(entry.title)} down" title="Move down" ${position && position < count ? "" : "disabled"}>${arrowIcon("down")}</button>
+        <button class="ih-icon-btn ih-bucket-reorder-button" type="button" data-action="reorder-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-direction="up" aria-label="Move ${escapeAttr(entry.title)} up" title="Move up" aria-disabled="${isReorderBlocked("up", position, count)}">${arrowIcon("up")}</button>
+        <button class="ih-icon-btn ih-bucket-reorder-button" type="button" data-action="reorder-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-direction="down" aria-label="Move ${escapeAttr(entry.title)} down" title="Move down" aria-disabled="${isReorderBlocked("down", position, count)}">${arrowIcon("down")}</button>
       </span>
     `;
   }
@@ -1995,8 +1992,13 @@
     const reorder = card.querySelector("[data-bucket-reorder]");
     if (reorder) reorder.hidden = !position;
     card.querySelectorAll("[data-action='reorder-bucket-option']").forEach((button) => {
-      button.disabled = button.dataset.direction === "up" ? position <= 1 : !position || position >= count;
+      button.setAttribute("aria-disabled", String(isReorderBlocked(button.dataset.direction, position, count)));
     });
+  }
+
+  // Edge buttons use aria-disabled so they keep focus: pressing Move up again at the top does nothing.
+  function isReorderBlocked(direction, position, count) {
+    return direction === "up" ? position <= 1 : !position || position >= count;
   }
 
   function renderBucketCard(questionDef, answer, entry, position) {
@@ -2019,7 +2021,7 @@
   }
 
   function renderMoveMenu(questionDef, entry, currentBucketId) {
-    const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+    const buckets = bucketsWithUnsorted(questionDef);
     return `
       <details class="ih-move-menu">
         <summary class="ih-move-button" data-action="toggle-move-menu" aria-label="Move bucket option" title="Move to bucket">${moveIcon()}</summary>
@@ -3994,15 +3996,20 @@
       answer.order = order;
       this.syncBucketDom(context);
       this.markChanged(answer);
-      const card = button.closest(".ih-bucket-table-card");
-      const focusTarget = button.disabled && card ? card.querySelector("[data-action='reorder-bucket-option']:not(:disabled)") : button;
-      if (focusTarget) focusTarget.focus();
+      // Reordering can move this card in the DOM, which drops focus.
+      button.focus();
     }
 
     moveBucketOption(button, context) {
       const menu = button.closest(".ih-move-menu");
+      const hadFocus = button.contains(document.activeElement);
+      const fromKeyboard = button.matches(":focus-visible");
       if (menu) menu.open = false;
       this.setBucket(button.dataset.optionId, button.dataset.bucketId || "", context);
+      // The card may now sit in another list, which drops focus. Return it to the control just used,
+      // following the card only for keyboard users so a mouse user keeps their place.
+      const control = menu ? menu.querySelector(".ih-move-button") : button;
+      if (hadFocus && control) control.focus({ preventScroll: !fromKeyboard });
     }
 
     toggleMoveMenu(button) {
@@ -4136,7 +4143,7 @@
         list.querySelectorAll(".ih-bucket-empty").forEach((empty) => empty.remove());
         cards.forEach((card, index) => {
           if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
-          syncBucketCardPosition(card, bucketId ? index + 1 : 0, cards.length);
+          syncBucketCardPosition(card, bucketPosition(bucketId, index), cards.length);
         });
         if (!cards.length) {
           const empty = document.createElement("div");
@@ -4493,8 +4500,17 @@
     return kept.concat(ids.filter((id) => !kept.includes(id)));
   }
 
+  function bucketsWithUnsorted(questionDef) {
+    return [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+  }
+
+  // Unsorted cards keep their place in `order` but are not ranked.
+  function bucketPosition(bucketId, index) {
+    return bucketId ? index + 1 : 0;
+  }
+
   function bucketGroups(questionDef, answer) {
-    const groups = new Map([["", []]].concat(questionDef.buckets.map((bucket) => [bucket.id, []])));
+    const groups = new Map(bucketsWithUnsorted(questionDef).map((bucket) => [bucket.id, []]));
     normalizeBucketOrder(questionDef, answer.order).forEach((id) => {
       const bucketId = answer.buckets && answer.buckets[id] || "";
       (groups.get(bucketId) || groups.get("")).push(questionDef.options.find((entry) => entry.id === id));
