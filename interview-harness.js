@@ -122,7 +122,7 @@
     const id = `q${index + 1}`;
     raw.id = id;
     raw.sourcePath = path;
-    raw.previewFrame = collectProblem(problems, () => normalizePreviewFrame(raw.previewFrame, `${path}.previewFrame`));
+    if (allowed.includes("previewFrame")) raw.previewFrame = collectProblem(problems, () => normalizePreviewFrame(raw.previewFrame, `${path}.previewFrame`));
     const prompt = collectProblem(problems, () => requiredString(raw.prompt, `${path}.prompt`));
     const normalize = questionNormalizers[type];
     const normalized = collectProblem(problems, () => normalize(raw));
@@ -4375,7 +4375,7 @@
     try {
       const problems = errorProblems(error);
       const report = [
-        `The interview page failed to open. Interview Harness ${VERSION} reported:`,
+        `Interview Harness ${VERSION} could not open the interview:`,
         ...problems.map((problem) => `- ${problem}`),
         "Fix the interview file and send it again."
       ].join("\n");
@@ -4384,18 +4384,11 @@
       injectStyles();
       const root = resolveTarget(`#${DEFAULT_TARGET_ID}`);
       root.innerHTML = renderMountError(theme, problems, report);
-      let toastTimer = null;
-      const toast = (message) => {
-        const node = root.querySelector(".ih-toast");
-        clearTimeout(toastTimer);
-        node.textContent = message;
-        node.classList.add("is-visible");
-        toastTimer = setTimeout(() => node.classList.remove("is-visible"), 1700);
-      };
+      const panel = { root, toastTimer: null, toast: InterviewHarnessApp.prototype.toast };
       root.querySelector("[data-action='copy-error-report']").addEventListener("click", () => {
-        copyToClipboard(report).then(() => toast("Copied report."), () => {
+        copyToClipboard(report).then(() => panel.toast("Copied report."), () => {
           global.getSelection().selectAllChildren(root.querySelector("[data-error-report]"));
-          toast("Copy blocked. Report text selected.");
+          panel.toast("Copy blocked. Report text selected.");
         });
       });
     } catch (_) {}
@@ -4433,8 +4426,9 @@
     textarea.style.left = "-9999px";
     document.body.appendChild(textarea);
     textarea.select();
-    document.execCommand("copy");
+    const copied = document.execCommand("copy");
     textarea.remove();
+    if (!copied) throw new Error("Copy blocked.");
   }
 
   function nextLabel(instance) {
@@ -5100,8 +5094,8 @@
   }
 
   function errorProblems(error) {
-    if (error && Array.isArray(error.problems)) return error.problems;
-    return [String((error && error.message) || error)];
+    if (error && Array.isArray(error.problems) && error.problems.length) return error.problems;
+    return [String((error && error.message) || error) || "Unknown error."];
   }
 
   function configFingerprint(value) {
