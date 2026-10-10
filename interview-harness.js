@@ -274,7 +274,7 @@
     bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), order: questionDef.options.map((entry) => entry.id), comments: {} }),
     flow: initialFlowAnswer,
     sequence: initialSequenceAnswer,
-    edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", touched: false })
+    edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", confirmed: false, touched: false })
   };
 
   const answerHydrators = {
@@ -328,7 +328,8 @@
     },
     edit(questionDef, answer, saved) {
       answer.summary = String(saved.summary || "");
-      answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
+      answer.confirmed = Boolean(saved.confirmed);
+      answer.touched = Boolean(saved.touched || answer.confirmed || saved.summary || isEditChanged(questionDef, answer));
     }
   };
 
@@ -391,15 +392,20 @@
     const lines = [`# ${config.title}`, ""];
     const closingNote = String(state.closingNote || "").trim();
     let changed = false;
+    const unanswered = [];
     config.questions.forEach((questionDef, index) => {
       const answer = state.answers[questionDef.id];
-      if (!isAnswerChanged(questionDef, answer)) return;
+      if (!isAnswerChanged(questionDef, answer)) {
+        unanswered.push(`- ${index + 1}. ${questionDef.prompt}`);
+        return;
+      }
       changed = true;
       lines.push(`## ${index + 1}. ${questionDef.prompt}`);
       textExporters[questionDef.type](lines, questionDef, answer);
       lines.push("");
     });
     if (!changed && !closingNote) lines.push("No user changes yet.");
+    else if (unanswered.length) lines.push("## Not answered", ...unanswered, "");
     // The note is free text, so it stays last where its headings or fences cannot run into generated sections.
     if (closingNote) lines.push("## Not covered by the questions", closingNote);
 
@@ -455,13 +461,24 @@
   }
 
   function appendEditAnswer(lines, questionDef, answer) {
-    if (String(answer.content || "") !== artifactText(questionDef.artifact)) {
+    if (isEditChanged(questionDef, answer)) {
       lines.push("Edited artifact:");
       lines.push("```");
       lines.push(answer.content || "");
       lines.push("```");
+    } else if (answer.confirmed) {
+      lines.push("Status: Accepted as proposed.");
     }
     if (answer.summary) lines.push(`Overall comment: ${answer.summary}`);
+  }
+
+  function isEditChanged(questionDef, answer) {
+    return String(answer && answer.content || "") !== artifactText(questionDef.artifact);
+  }
+
+  function editStatusText(questionDef, answer) {
+    if (isEditChanged(questionDef, answer)) return "Edited.";
+    return answer.confirmed ? "Accepted as proposed." : "Edit the artifact, or accept it as proposed.";
   }
 
   function appendFlowAnswer(lines, questionDef, answer) {
@@ -534,7 +551,7 @@
     ),
     flow: (questionDef, answer) => Boolean(answer.confirmed || isFlowChanged(questionDef, answer)),
     sequence: (_questionDef, answer) => Boolean(answer.confirmed || answer.comment),
-    edit: (questionDef, answer) => Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary)
+    edit: (questionDef, answer) => Boolean(answer.confirmed || isEditChanged(questionDef, answer) || answer.summary)
   };
 
   function isAnswerChanged(questionDef, answer) {
@@ -1247,6 +1264,9 @@
     .ih-sequence-error { margin: 0; padding: 10px 12px; border-top: 1px solid var(--ih-line); color: var(--ih-danger); background: var(--ih-surface-2); font-size: 13px; }
     .ih-sequence-fallback { min-height: 360px; border: 0; border-top: 1px solid var(--ih-line); border-radius: 0; }
     .ih-edit { display: grid; gap: 10px; }
+    .ih-edit .ih-option-top { align-items: center; min-height: 36px; margin-bottom: 8px; }
+    .ih-edit-actions { display: flex; align-items: center; gap: 8px; }
+    .ih-edit-status { margin: 10px 0 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; }
     .ih-code-editor-host, .ih-code-fallback {
       min-height: 440px;
       border: 0;
@@ -2038,11 +2058,15 @@
         <div class="ih-card" data-edit>
           <div class="ih-option-top">
             <label class="ih-label">Editable artifact</label>
-            ${renderCommentButton("edit-summary", "", answer.summary || "", "Comment on edited artifact")}
+            <div class="ih-edit-actions" data-edit-actions>
+              ${answer.confirmed || isEditChanged(questionDef, answer) ? "" : `<button class="ih-btn" type="button" data-action="edit-accept">Accept as proposed</button>`}
+              ${renderCommentButton("edit-summary", "", answer.summary || "", "Comment on edited artifact")}
+            </div>
           </div>
           <div class="ih-code-editor-host" data-code-editor data-lang="${escapeAttr(questionDef.artifact && questionDef.artifact.lang || questionDef.language || "")}"></div>
           <textarea class="ih-code-fallback ih-auto-field" data-input="edit-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
           <div class="ih-editor-loading" data-editor-loading>Loading syntax editor...</div>
+          <p class="ih-edit-status" data-edit-status>${escapeHTML(editStatusText(questionDef, answer))}</p>
         </div>
       </div>
     `;
@@ -2642,6 +2666,7 @@
       if (action === "flow-redo") return this.redoFlow(context);
       if (action === "flow-arrange") return this.arrangeFlow(context);
       if (action === "sequence-confirm") return this.confirmSequence(context);
+      if (action === "edit-accept") return this.acceptEdit(context);
     }
 
     onMouseover(event) {
@@ -2711,7 +2736,10 @@
         this.syncOpenCommentButton();
       }
       if (kind === "added-title") this.updateAddedTitle(input.dataset.optionId, input.value, context);
-      if (kind === "edit-content") answer.content = input.value;
+      if (kind === "edit-content") {
+        answer.content = input.value;
+        this.refreshEditResponse(context);
+      }
       if (kind === "sequence-source") {
         answer.source = input.value;
         const validation = validateSequenceSource(answer.source);
@@ -3851,6 +3879,33 @@
       }
     }
 
+    acceptEdit(context) {
+      if (!context || context.questionDef.type !== "edit") return;
+      context.answer.confirmed = true;
+      this.refreshEditResponse(context);
+      this.markChanged(context.answer);
+    }
+
+    refreshEditResponse(context) {
+      if (!context || context.questionDef.type !== "edit") return;
+      const section = this.sectionForContext(context);
+      if (!section) return;
+      const status = section.querySelector("[data-edit-status]");
+      if (status) status.textContent = editStatusText(context.questionDef, context.answer);
+      const actions = section.querySelector("[data-edit-actions]");
+      const accept = actions && actions.querySelector("[data-action='edit-accept']");
+      if (context.answer.confirmed || isEditChanged(context.questionDef, context.answer)) {
+        accept?.remove();
+      } else if (actions && !accept) {
+        const button = document.createElement("button");
+        button.className = "ih-btn";
+        button.type = "button";
+        button.dataset.action = "edit-accept";
+        button.textContent = "Accept as proposed";
+        actions.prepend(button);
+      }
+    }
+
     initCodeEditors() {
       this.root.querySelectorAll("[data-code-editor]").forEach((host) => this.initCodeEditor(host));
     }
@@ -3868,6 +3923,7 @@
         lang: host.dataset.lang || "",
         onChange: (value) => {
           context.answer.content = value;
+          this.refreshEditResponse(context);
           this.markChanged(context.answer, true);
         }
       }).then((view) => {
@@ -4470,7 +4526,7 @@
     )),
     flow: (_questionDef, answer) => Boolean(answer.confirmed),
     sequence: (_questionDef, answer) => Boolean(answer.confirmed),
-    edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
+    edit: (_questionDef, answer) => Boolean(answer.confirmed) || (Boolean(answer.touched) && Boolean(String(answer.content || "").trim()))
   };
 
   function isQuestionAnswered(questionDef, answer) {
