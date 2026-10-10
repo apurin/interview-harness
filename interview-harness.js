@@ -398,6 +398,7 @@
       lines.push("");
     });
     if (!changed && !closingNote) lines.push("No user changes yet.");
+    // The note is free text, so it stays last where its headings or fences cannot run into generated sections.
     if (closingNote) lines.push("## Not covered by the questions", closingNote);
 
     return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
@@ -2141,7 +2142,7 @@
           <div>
             <p class="ih-kicker">Output</p>
             <h2 class="ih-prompt">Export the answer summary.</h2>
-            <p class="ih-export-note">Copy the answer summary for the next agent.</p>
+            <p class="ih-export-note">Add anything the questions missed, then copy the answer summary for the next agent.</p>
           </div>
         </div>
         <div class="ih-card ih-closing-note">
