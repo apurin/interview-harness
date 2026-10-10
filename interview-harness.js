@@ -11,7 +11,9 @@
   const THEME_STORAGE_KEY = "interview-harness:theme";
   const THEME_WINDOW_NAME_PREFIX = "__IH_THEME__:";
   const COLUMN_WIDTHS = ["narrow", "medium", "wide"];
+  const FLOW_NODE_HEIGHT = 52;
   const FLOW_LABEL_LINE_CHARS = 28;
+  const FLOW_LABEL_PHRASE_STARTS = new Set("and or but so then because if when unless while until once after before by for from in into on onto to with within without over under at via through during since per between".split(" "));
   const FLOW_LABEL_POSITIONS = [0.5, 0.46, 0.54, 0.42, 0.58, 0.38, 0.62, 0.34, 0.66, 0.3, 0.7, 0.26, 0.74, 0.22, 0.78, 0.18, 0.82];
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
   const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
@@ -1248,7 +1250,7 @@
     .ih-flow-canvas {
       position: relative;
       width: 100%;
-      height: min(58vh, 620px);
+      height: max(min(58vh, 620px), min(var(--ih-flow-fit-height, 0px), 70vh));
       min-height: 460px;
       background:
         linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
@@ -1567,7 +1569,7 @@
       .ih-grid[data-column-width] { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection-actions { justify-self: start; }
-      .ih-flow-canvas { min-height: 400px; height: 60vh; }
+      .ih-flow-canvas { min-height: 400px; height: max(60vh, min(var(--ih-flow-fit-height, 0px), 70vh)); }
     }
   `;
 
@@ -2104,7 +2106,7 @@
           </div>
           <p class="ih-flow-tip">Drag nodes to move them. Hold <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌘</span></kbd> while dragging between nodes to connect them.</p>
         </div>
-        <div class="ih-flow-canvas" data-flow-editor data-question-id="${escapeAttr(questionDef.id)}">
+        <div class="ih-flow-canvas" data-flow-editor data-question-id="${escapeAttr(questionDef.id)}" style="--ih-flow-fit-height: ${flowFitHeight(answer)}px">
           <span class="ih-flow-loading">Loading flow editor...</span>
         </div>
         <div class="ih-flow-selection" data-flow-selection>
@@ -2557,6 +2559,7 @@
       this.theme = readSharedTheme();
       this.saveTimer = null;
       this.chromeFrame = null;
+      this.renderFrame = null;
       this.sortables = [];
       this.flowEditors = [];
       this.flowHistories = new Map();
@@ -2614,7 +2617,10 @@
     }
 
     afterRender() {
-      requestAnimationFrame(() => {
+      // Two renders can land before the next frame (marked.js loading quickly); enhance only the latest DOM, once.
+      cancelAnimationFrame(this.renderFrame);
+      this.renderFrame = requestAnimationFrame(() => {
+        this.renderFrame = null;
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
         this.initPhoneFrames();
         this.initColumnFrames();
@@ -3285,8 +3291,7 @@
       if (!hosts.length) return;
       ensureVisNetwork().then((vis) => {
         hosts.forEach((host) => {
-          // Two renders before the first frame queue two initialisations for the same host.
-          if (host.isConnected && !this.flowEditors.some((editor) => editor.host === host)) this.initFlowEditor(host, vis);
+          if (host.isConnected) this.initFlowEditor(host, vis);
         });
       }).catch(() => {
         hosts.forEach((host) => {
@@ -3315,6 +3320,9 @@
       const spacing = flowLayoutSpacing(flowConnections);
       const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name], flowTheme, levels[node.name])));
       const edges = new vis.DataSet(flowConnections.map((connection) => flowVisConnectionRecord(connection, flowConnections, flowTheme)));
+      // Labels and routes keep to the view the first fit shows; moving a node later does not refit the view.
+      let fittedView = null;
+      const layoutView = () => fittedView || flowFitBox(network, host);
       const network = new vis.Network(host, { nodes, edges }, {
         autoResize: true,
         nodes: {
@@ -3383,7 +3391,7 @@
             this.markChanged(answer);
             setTimeout(() => {
               if (!host.isConnected) return;
-              routeFlowEdges(network, edges, answer.connections, host);
+              routeFlowEdges(network, edges, answer.connections, layoutView());
               network.selectEdges([key]);
               this.refreshFlowSelection(context);
             }, 0);
@@ -3431,7 +3439,7 @@
         }
       };
       this.flowEditors.push(editor);
-      network.on("afterDrawing", (ctx) => drawFlowLabels(ctx, network, edges, answer.connections, flowTheme, host));
+      network.on("afterDrawing", (ctx) => drawFlowLabels(ctx, network, edges, answer.connections, flowTheme, layoutView()));
       network.on("click", (params) => {
         answer.adding = false;
         if (params.nodes.length) answer.selected = { kind: "node", name: String(params.nodes[0]) };
@@ -3444,11 +3452,12 @@
       network.on("dragEnd", (params) => {
         if (connecting || !params.nodes.length) return;
         answer.positions = Object.assign({}, safeObject(answer.positions), network.getPositions(params.nodes.map(String)));
-        routeFlowEdges(network, edges, answer.connections, host);
+        routeFlowEdges(network, edges, answer.connections, layoutView());
         this.save();
       });
       const finishInitialDrawing = () => {
-        routeFlowEdges(network, edges, answer.connections, host);
+        fittedView = flowFitBox(network, host);
+        routeFlowEdges(network, edges, answer.connections, fittedView);
         network.fit({ animation: { duration: 320, easingFunction: "easeInOutQuad" } });
         const selected = normalizeFlowSelection(answer.selected, answer);
         if (selected && selected.kind === "node") network.selectNodes([selected.name], false);
@@ -4871,26 +4880,79 @@
     return positions;
   }
 
+  // Width in narrow characters: East Asian wide characters and emoji take two.
+  function flowTextWidth(text) {
+    return Array.from(text).reduce((width, char) => width
+      + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u.test(char) ? 2 : 1), 0);
+  }
+
+  // The canvas height that shows the flow at full scale: network.fit() leaves a 10% margin around the node bounds.
+  function flowFitHeight(answer) {
+    const nodes = normalizeFlowNodes(answer.nodes, answer.connections);
+    const connections = normalizeFlowConnections(answer.connections, false);
+    const positions = Object.values(normalizeFlowPositions(answer.positions, nodes));
+    const levelSeparation = flowLayoutSpacing(connections).levelSeparation;
+    const rows = positions.length
+      ? positions.map((position) => position.y)
+      : Object.values(flowLevels(nodes, connections)).map((level) => level * levelSeparation);
+    return rows.length ? Math.round(1.1 * (Math.max(...rows) - Math.min(...rows) + FLOW_NODE_HEIGHT)) : 0;
+  }
+
+  // Wraps a connection label for display in the fewest lines of FLOW_LABEL_LINE_CHARS, choosing the breaks that keep
+  // lines even, favour punctuation and a following conjunction or preposition, and keep a number with the word after it.
   function flowDisplayLabel(value) {
-    const words = String(value || "").split(/\s+/).filter(Boolean);
-    const text = words.join(" ");
-    if (text.length <= FLOW_LABEL_LINE_CHARS) return text;
-    const lineCount = Math.ceil(text.length / FLOW_LABEL_LINE_CHARS);
-    for (let width = Math.ceil(text.length / lineCount); ; width += 1) {
-      const lines = [];
-      words.forEach((word) => {
-        const last = lines.length - 1;
-        if (last >= 0 && lines[last].length + 1 + word.length <= width) lines[last] += ` ${word}`;
-        else lines.push(word);
-      });
-      if (lines.length <= lineCount || width >= FLOW_LABEL_LINE_CHARS) return lines.join("\n");
+    const pieces = [];
+    String(value || "").split(/\s+/).filter(Boolean).forEach((word) => {
+      // Text without spaces (CJK, long URLs) may break between any two characters.
+      const parts = flowTextWidth(word) > FLOW_LABEL_LINE_CHARS ? Array.from(word) : [word];
+      parts.forEach((text, index) => pieces.push({ text, spaced: index === 0 && pieces.length > 0 }));
+    });
+    // offsets[i]: the width of pieces [0, i) set on one line.
+    const offsets = [0];
+    pieces.forEach((piece, index) => offsets.push(offsets[index] + flowTextWidth(piece.text) + (piece.spaced ? 1 : 0)));
+    const lineWidth = (start, end) => offsets[end] - offsets[start] - (pieces[start].spaced ? 1 : 0);
+    const lineText = (start, end) => pieces.slice(start, end).map((piece, index) => (index && piece.spaced ? " " : "") + piece.text).join("");
+    const fits = (start, end) => end - start === 1 || lineWidth(start, end) <= FLOW_LABEL_LINE_CHARS;
+    let lineCount = 0;
+    for (let start = 0; start < pieces.length; lineCount += 1) {
+      let end = start + 1;
+      while (end < pieces.length && fits(start, end + 1)) end += 1;
+      start = end;
     }
+    if (lineCount <= 1) return lineText(0, pieces.length);
+    const target = lineWidth(0, pieces.length) / lineCount;
+    const startsPhrase = (text) => FLOW_LABEL_PHRASE_STARTS.has(text.toLowerCase().replace(/[^a-z]/g, ""));
+    // The cost of a line break before pieces[index]; negative where a reader expects one. Punctuation and small kana
+    // never start a line, and a number stays with the word after it ("48 h", "3 retries").
+    const breakCost = (index) => {
+      const before = pieces[index - 1].text;
+      const after = pieces[index].text;
+      const spaced = pieces[index].spaced;
+      if (/^[,;:.!?)、。，；：！？）ーぁぃぅぇぉっゃゅょァィゥェォッャュョ]/.test(after) || spaced && /\d$/.test(before) && !startsPhrase(after)) return 300;
+      return (/[,;:.!?)、。，；：！？）]$/.test(before) ? -80 : 0)
+        + (spaced ? 0 : 20)
+        + (startsPhrase(after) ? -40 : 0)
+        + (startsPhrase(before) || /^(a|an|the)$/i.test(before) ? 40 : 0);
+    };
+    // best[lines][end]: the cheapest way to set pieces [0, end) in that many lines.
+    const best = [[{ cost: 0, breaks: [] }]];
+    for (let lines = 1; lines <= lineCount; lines += 1) {
+      best[lines] = [];
+      best[lines - 1].forEach((previous, start) => {
+        for (let end = start + 1; end <= pieces.length && fits(start, end); end += 1) {
+          const cost = previous.cost + (lineWidth(start, end) - target) ** 2 + (end < pieces.length ? breakCost(end) : 0);
+          if (!best[lines][end] || cost < best[lines][end].cost) best[lines][end] = { cost, breaks: previous.breaks.concat(end) };
+        }
+      });
+    }
+    const breaks = [0].concat(best[lineCount][pieces.length].breaks);
+    return breaks.slice(1).map((end, index) => lineText(breaks[index], end)).join("\n");
   }
 
   function flowLayoutSpacing(connections) {
     const labels = asArray(connections).filter((connection) => connection.label)
       .map((connection) => ({ connection, lines: flowDisplayLabel(connection.label).split("\n") }));
-    const labelWidth = (label) => 6.2 * Math.max(...label.lines.map((line) => line.length));
+    const labelWidth = (label) => 6.2 * Math.max(...label.lines.map(flowTextWidth));
     let fanWidth = 0;
     ["from", "to"].forEach((end) => {
       const groups = {};
@@ -5076,10 +5138,9 @@
 
   // Keep each edge clear of the nodes it does not connect. When the default curve passes through one, use the wider
   // curve on either side that passes through the fewest nodes, stays in view and crosses the fewest other edges.
-  function routeFlowEdges(network, edges, connections, host) {
+  function routeFlowEdges(network, edges, connections, view) {
     const positions = network.getPositions();
     const boxes = flowNodeBoxes(network, 8);
-    const view = flowFitBox(network, host);
     const valid = asArray(connections).filter((connection) => positions[connection.from] && positions[connection.to]
       && edges.get(flowConnectionKey(connection.from, connection.to)));
     const curves = {};
@@ -5114,51 +5175,105 @@
     edges.update(updates);
   }
 
+  // Whether any segment of the polyline passes through the box (Liang-Barsky clipping).
+  function flowPolylineCrossesBox(points, box) {
+    return points.some((a, index) => {
+      const b = points[index + 1];
+      if (!b) return false;
+      let enter = 0;
+      let exit = 1;
+      return [[a.x - b.x, a.x - box.left], [b.x - a.x, box.right - a.x], [a.y - b.y, a.y - box.top], [b.y - a.y, box.bottom - a.y]]
+        .every(([direction, distance]) => {
+          if (direction === 0) return distance >= 0;
+          if (direction < 0) enter = Math.max(enter, distance / direction);
+          else exit = Math.min(exit, distance / direction);
+          return enter <= exit;
+        });
+    });
+  }
+
+  // Label centres to try for an edge, nearest its midpoint first: on the curve or beside it.
+  function flowEdgeLabelCentres(from, to, smooth, width, height) {
+    const centres = [];
+    FLOW_LABEL_POSITIONS.forEach((t) => {
+      const point = flowEdgePoint(from, to, smooth, t);
+      const ahead = flowEdgePoint(from, to, smooth, t + 0.02);
+      // Beside a steep stretch means left or right of it; beside a flat stretch means above or below it.
+      const steep = Math.abs(ahead.y - point.y) >= Math.abs(ahead.x - point.x);
+      const bend = steep ? point.x - (from.x + (to.x - from.x) * t) : point.y - (from.y + (to.y - from.y) * t);
+      const outside = bend >= 0 ? 1 : -1;
+      // A curved edge (reciprocal or routed around a node) keeps its label on the outside of its bend.
+      const sides = smooth.type === "cubicBezier" ? [0, outside, -outside] : [outside, 0, -outside];
+      sides.forEach((side) => centres.push({
+        x: point.x + (steep ? side * (width / 2 + 4) : 0),
+        y: point.y + (steep ? 0 : side * (height / 2 + 4))
+      }));
+    });
+    return centres;
+  }
+
+  // Label centres to try for a node's connection to itself, just outside the loop: up and right, up, right, up and left.
+  // vis-network draws the loop with radius 20 around the point where a 45-degree line from the node's centre leaves the
+  // box, which for a box wider than tall is half its height up and to the right.
+  function flowLoopLabelCentres(node, nodeBox, width, height) {
+    const half = (nodeBox.bottom - nodeBox.top) / 2;
+    return [[1, 1], [0, 1], [1, 0], [-1, 1]].map(([right, up]) => {
+      // The label's nearest corner or side sits 24px (radius and gap) from the loop's centre.
+      const reach = right && up ? 24 / Math.SQRT2 : 24;
+      return { x: node.x + half + right * (reach + width / 2), y: node.y - half - up * (reach + height / 2) };
+    });
+  }
+
   // vis-network always centres an edge label on the curve midpoint; this draws labels instead and slides each one
-  // along its edge, centred on it or beside it, until it clears the nodes and the labels already placed.
-  function drawFlowLabels(ctx, network, edges, connections, theme, host) {
+  // along its edge, centred on it or beside it, until it clears the nodes, the labels already placed and other edges.
+  function drawFlowLabels(ctx, network, edges, connections, theme, view) {
+    // Like vis-network's own labels, hide text that would be drawn smaller than 4px.
+    if (11 * network.getScale() < 4) return;
     const positions = network.getPositions();
-    const boxes = flowNodeBoxes(network, 4);
-    const view = flowFitBox(network, host);
-    const taken = Object.keys(boxes).map((name) => boxes[name]);
+    const nodeBoxes = Object.values(flowNodeBoxes(network, 4));
+    const placed = [];
     const lineHeight = 13;
+    const present = asArray(connections)
+      .map((connection) => ({ connection, edge: edges.get(flowConnectionKey(connection.from, connection.to)) }))
+      .filter(({ connection, edge }) => edge && positions[connection.from] && positions[connection.to]);
+    const curves = present.filter(({ connection }) => connection.from !== connection.to).map(({ connection, edge }) => {
+      const points = flowCurvePoints(positions[connection.from], positions[connection.to], edge.smooth);
+      const xs = points.map((point) => point.x);
+      const ys = points.map((point) => point.y);
+      return { connection, points, bounds: { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) } };
+    });
+    // What a label box would hide or confuse: nodes worst, then placed labels, then other edges.
+    const cost = (box, connection) => {
+      const clearance = { left: box.left - 3, top: box.top - 3, right: box.right + 3, bottom: box.bottom + 3 };
+      return 3 * nodeBoxes.filter((other) => flowBoxesOverlap(box, other)).length
+        + 2 * placed.filter((other) => flowBoxesOverlap(box, other)).length
+        + curves.filter((curve) => curve.connection !== connection && flowBoxesOverlap(clearance, curve.bounds)
+          && flowPolylineCrossesBox(curve.points, clearance)).length;
+    };
+    const length = ({ connection }) => Math.hypot(positions[connection.to].x - positions[connection.from].x, positions[connection.to].y - positions[connection.from].y);
     ctx.save();
     ctx.font = "11px Inter, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const labelled = asArray(connections).filter((connection) => connection.label && positions[connection.from] && positions[connection.to]);
-    const length = (connection) => Math.hypot(positions[connection.to].x - positions[connection.from].x, positions[connection.to].y - positions[connection.from].y);
     // Short edges have the least room to move a label, so they choose first.
-    labelled.sort((a, b) => length(a) - length(b)).forEach((connection) => {
-      const edge = edges.get(flowConnectionKey(connection.from, connection.to));
-      const from = positions[connection.from];
-      const to = positions[connection.to];
-      if (!edge) return;
+    present.filter(({ connection }) => connection.label).sort((a, b) => length(a) - length(b)).forEach(({ connection, edge }) => {
       const lines = flowDisplayLabel(connection.label).split("\n");
       const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 8;
       const height = lines.length * lineHeight + 4;
-      const curved = edge.smooth.type !== "cubicBezier";
+      const centres = connection.from === connection.to
+        ? flowLoopLabelCentres(positions[connection.from], network.getBoundingBox(connection.from), width, height)
+        : flowEdgeLabelCentres(positions[connection.from], positions[connection.to], edge.smooth, width, height);
       let best = null;
-      FLOW_LABEL_POSITIONS.some((t) => {
-        const point = flowEdgePoint(from, to, edge.smooth, t);
-        const ahead = flowEdgePoint(from, to, edge.smooth, t + 0.02);
-        // Beside a steep stretch means left or right of it; beside a flat stretch means above or below it.
-        const steep = Math.abs(ahead.y - point.y) >= Math.abs(ahead.x - point.x);
-        const bend = steep ? point.x - (from.x + (to.x - from.x) * t) : point.y - (from.y + (to.y - from.y) * t);
-        const outside = bend >= 0 ? 1 : -1;
-        // A curved edge (reciprocal or routed around a node) keeps its label on the outside of its bend.
-        const sides = curved ? [outside, 0, -outside] : [0, outside, -outside];
-        return sides.some((side) => {
-          const x = point.x + (steep ? side * (width / 2 + 4) : 0);
-          const y = point.y + (steep ? 0 : side * (height / 2 + 4));
-          const box = { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
-          const collisions = taken.filter((other) => flowBoxesOverlap(box, other)).length
-            + (flowOutside(view, { x: box.left, y: box.top }) || flowOutside(view, { x: box.right, y: box.bottom }) ? 1 : 0);
-          if (!best || collisions < best.collisions) best = { x, box, collisions };
-          return collisions === 0;
-        });
+      centres.some((centre) => {
+        // Slide a label that would leave the view back inside it, over its own edge if need be.
+        const x = view ? Math.min(Math.max(centre.x, view.left + width / 2 + 4), view.right - width / 2 - 4) : centre.x;
+        const y = view ? Math.min(Math.max(centre.y, view.top + height / 2 + 4), view.bottom - height / 2 - 4) : centre.y;
+        const box = { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
+        const score = cost(box, connection);
+        if (!best || score < best.score) best = { x, box, score };
+        return score === 0;
       });
-      taken.push(best.box);
+      placed.push(best.box);
       ctx.fillStyle = theme.labelBackground;
       ctx.fillRect(best.box.left, best.box.top, width, height);
       ctx.fillStyle = theme.muted;
