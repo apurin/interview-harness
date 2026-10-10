@@ -11,6 +11,8 @@
   const THEME_STORAGE_KEY = "interview-harness:theme";
   const THEME_WINDOW_NAME_PREFIX = "__IH_THEME__:";
   const COLUMN_WIDTHS = ["narrow", "medium", "wide"];
+  const FLOW_LABEL_LINE_CHARS = 28;
+  const FLOW_LABEL_POSITIONS = [0.5, 0.46, 0.54, 0.42, 0.58, 0.38, 0.62, 0.34, 0.66, 0.3, 0.7, 0.26, 0.74, 0.22, 0.78, 0.18, 0.82];
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
   const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
   const LINES_AND_ARROWS_URL = "https://cdn.jsdelivr.net/npm/lines-and-arrows@0.15.0/dist/lines-and-arrows.auto.min.js";
@@ -3195,7 +3197,8 @@
       if (!hosts.length) return;
       ensureVisNetwork().then((vis) => {
         hosts.forEach((host) => {
-          if (host.isConnected) this.initFlowEditor(host, vis);
+          // Two renders before the first frame queue two initialisations for the same host.
+          if (host.isConnected && !this.flowEditors.some((editor) => editor.host === host)) this.initFlowEditor(host, vis);
         });
       }).catch(() => {
         hosts.forEach((host) => {
@@ -3219,8 +3222,10 @@
         });
       }
       const flowTheme = flowVisualTheme(host);
-      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name], flowTheme)));
       const flowConnections = normalizeFlowConnections(answer.connections, false);
+      const levels = shouldAutoArrange ? flowLevels(flowNodes, flowConnections) : {};
+      const spacing = flowLayoutSpacing(flowConnections);
+      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name], flowTheme, levels[node.name])));
       const edges = new vis.DataSet(flowConnections.map((connection) => flowVisConnectionRecord(connection, flowConnections, flowTheme)));
       const network = new vis.Network(host, { nodes, edges }, {
         autoResize: true,
@@ -3233,7 +3238,6 @@
           chosen: { node: true, label: false }
         },
         edges: {
-          font: { color: flowTheme.muted, size: 11, face: "Inter, system-ui, sans-serif", background: flowTheme.labelBackground, strokeWidth: 0, align: "horizontal" },
           selectionWidth: 2.4,
           hoverWidth: 1.5,
           chosen: { edge: true, label: false }
@@ -3243,9 +3247,9 @@
             enabled: shouldAutoArrange,
             direction: "UD",
             sortMethod: "directed",
-            levelSeparation: 120,
-            nodeSpacing: 210,
-            treeSpacing: 240,
+            levelSeparation: spacing.levelSeparation,
+            nodeSpacing: spacing.nodeSpacing,
+            treeSpacing: spacing.treeSpacing,
             blockShifting: true,
             edgeMinimization: true,
             parentCentralization: true
@@ -3291,6 +3295,7 @@
             this.markChanged(answer);
             setTimeout(() => {
               if (!host.isConnected) return;
+              routeFlowEdges(network, edges, answer.connections, host);
               network.selectEdges([key]);
               this.refreshFlowSelection(context);
             }, 0);
@@ -3338,6 +3343,7 @@
         }
       };
       this.flowEditors.push(editor);
+      network.on("afterDrawing", (ctx) => drawFlowLabels(ctx, network, edges, answer.connections, flowTheme, host));
       network.on("click", (params) => {
         answer.adding = false;
         if (params.nodes.length) answer.selected = { kind: "node", name: String(params.nodes[0]) };
@@ -3350,9 +3356,11 @@
       network.on("dragEnd", (params) => {
         if (connecting || !params.nodes.length) return;
         answer.positions = Object.assign({}, safeObject(answer.positions), network.getPositions(params.nodes.map(String)));
+        routeFlowEdges(network, edges, answer.connections, host);
         this.save();
       });
       const finishInitialDrawing = () => {
+        routeFlowEdges(network, edges, answer.connections, host);
         network.fit({ animation: { duration: 320, easingFunction: "easeInOutQuad" } });
         const selected = normalizeFlowSelection(answer.selected, answer);
         if (selected && selected.kind === "node") network.selectNodes([selected.name], false);
@@ -3657,7 +3665,7 @@
         answer.confirmed = true;
         answer.updated = true;
         const editor = this.flowEditorFor(context.questionDef.id);
-        if (editor) editor.edges.update({ id: selected.key, label: value });
+        if (editor) editor.network.redraw();
         this.markChanged(answer, true);
         this.refreshFlowToolbar(context);
         return;
@@ -4670,31 +4678,42 @@
     return positions;
   }
 
-  function defaultFlowPositions(nodes, connections) {
+  function flowLevels(nodes, connections) {
     const names = asArray(nodes).map((node) => node.name);
     const known = new Set(names);
     const incoming = Object.fromEntries(names.map((name) => [name, 0]));
     const outgoing = Object.fromEntries(names.map((name) => [name, []]));
     asArray(connections).forEach((connection) => {
-      if (!known.has(connection.from) || !known.has(connection.to)) return;
+      if (!known.has(connection.from) || !known.has(connection.to) || connection.from === connection.to) return;
       incoming[connection.to] += 1;
       outgoing[connection.from].push(connection.to);
     });
-    const levels = Object.fromEntries(names.map((name) => [name, 0]));
-    const queue = names.filter((name) => incoming[name] === 0);
+    // Depth-first order from the entry nodes; edges that point back up this order close a cycle and do not push levels down.
+    const order = [];
     const visited = new Set();
-    while (queue.length) {
-      const name = queue.shift();
-      if (visited.has(name)) continue;
+    const visit = (name) => {
       visited.add(name);
       outgoing[name].forEach((target) => {
-        levels[target] = Math.max(levels[target], levels[name] + 1);
-        incoming[target] -= 1;
-        if (incoming[target] === 0) queue.push(target);
+        if (!visited.has(target)) visit(target);
       });
-    }
-    const lastLevel = Math.max(0, ...Object.values(levels));
-    names.filter((name) => !visited.has(name)).forEach((name) => { levels[name] = lastLevel + 1; });
+      order.unshift(name);
+    };
+    names.filter((name) => incoming[name] === 0).concat(names).forEach((name) => {
+      if (!visited.has(name)) visit(name);
+    });
+    const rank = Object.fromEntries(order.map((name, index) => [name, index]));
+    const levels = Object.fromEntries(names.map((name) => [name, 0]));
+    order.forEach((name) => {
+      outgoing[name].forEach((target) => {
+        if (rank[target] > rank[name]) levels[target] = Math.max(levels[target], levels[name] + 1);
+      });
+    });
+    return levels;
+  }
+
+  function defaultFlowPositions(nodes, connections) {
+    const names = asArray(nodes).map((node) => node.name);
+    const levels = flowLevels(nodes, connections);
     const groups = {};
     names.forEach((name) => {
       const level = levels[name];
@@ -4711,6 +4730,46 @@
       });
     });
     return positions;
+  }
+
+  function flowDisplayLabel(value) {
+    const words = String(value || "").split(/\s+/).filter(Boolean);
+    const text = words.join(" ");
+    if (text.length <= FLOW_LABEL_LINE_CHARS) return text;
+    const lineCount = Math.ceil(text.length / FLOW_LABEL_LINE_CHARS);
+    for (let width = Math.ceil(text.length / lineCount); ; width += 1) {
+      const lines = [];
+      words.forEach((word) => {
+        const last = lines.length - 1;
+        if (last >= 0 && lines[last].length + 1 + word.length <= width) lines[last] += ` ${word}`;
+        else lines.push(word);
+      });
+      if (lines.length <= lineCount || width >= FLOW_LABEL_LINE_CHARS) return lines.join("\n");
+    }
+  }
+
+  function flowLayoutSpacing(connections) {
+    const labels = asArray(connections).filter((connection) => connection.label)
+      .map((connection) => ({ connection, lines: flowDisplayLabel(connection.label).split("\n") }));
+    const labelWidth = (label) => 6.2 * Math.max(...label.lines.map((line) => line.length));
+    let fanWidth = 0;
+    ["from", "to"].forEach((end) => {
+      const groups = {};
+      labels.forEach((label) => {
+        const name = label.connection[end];
+        groups[name] = (groups[name] || []).concat(labelWidth(label));
+      });
+      Object.values(groups).filter((widths) => widths.length > 1).forEach((widths) => {
+        fanWidth = Math.max(fanWidth, ...widths);
+      });
+    });
+    const lineCount = Math.max(0, ...labels.map((label) => label.lines.length));
+    const nodeSpacing = Math.round(Math.min(360, Math.max(210, 2 * fanWidth + 28)));
+    return {
+      levelSeparation: 120 + 14 * Math.max(0, lineCount - 2),
+      nodeSpacing,
+      treeSpacing: nodeSpacing + 30
+    };
   }
 
   function flowExportText(value) {
@@ -4736,7 +4795,7 @@
     };
   }
 
-  function flowVisNodeRecord(node, position, theme) {
+  function flowVisNodeRecord(node, position, theme, level) {
     const colors = theme || flowVisualTheme(null);
     const comment = String(node.comment || "");
     const highlighted = Boolean(comment.trim());
@@ -4758,6 +4817,7 @@
       record.x = position.x;
       record.y = position.y;
     }
+    if (Number.isFinite(level)) record.level = level;
     return record;
   }
 
@@ -4769,14 +4829,10 @@
     const colors = theme || flowVisualTheme(null);
     const comment = String(connection.comment || "");
     const highlighted = Boolean(comment.trim());
-    const smooth = flowReciprocalConnection(connections, connection)
-      ? { enabled: true, type: "curvedCW", roundness: 0.12 }
-      : { enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 };
     return {
       id: flowConnectionKey(connection.from, connection.to),
       from: connection.from,
       to: connection.to,
-      label: connection.label || "",
       comment,
       arrows: { to: { enabled: true, scaleFactor: 0.82 } },
       color: {
@@ -4787,8 +4843,189 @@
       },
       width: 1.7,
       dashes: false,
-      smooth
+      smooth: flowSmoothOptions(connection, connections)[0]
     };
+  }
+
+  // The first option is the default curve; with the edge's end positions, wider curves follow as alternatives.
+  function flowSmoothOptions(connection, connections, from, to) {
+    const length = from && to ? Math.hypot(to.x - from.x, to.y - from.y) : 0;
+    // The curvedCW/curvedCCW roundness that bends the edge about `bulge` pixels away from a straight line.
+    const roundness = (bulge) => {
+      for (let step = 1; step < 20; step += 1) {
+        if (0.25 * (1 + step / 20) * length * Math.sin(step / 40 * Math.PI) >= bulge) return step / 20;
+      }
+      return 1;
+    };
+    if (flowReciprocalConnection(connections, connection)) {
+      return (length ? [20, 45, 70].map(roundness) : [0.3]).map((value) => ({ enabled: true, type: "curvedCW", roundness: value }));
+    }
+    return [{ enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 }].concat(
+      (length ? [50, 90, 130] : []).map(roundness).flatMap((value) => ["curvedCW", "curvedCCW"].map((type) => ({ enabled: true, type, roundness: value })))
+    );
+  }
+
+  // Same curves vis-network draws for the smooth options above, so labels and routing can follow an edge.
+  function flowEdgePoint(from, to, smooth, t) {
+    const u = 1 - t;
+    if (smooth.type === "cubicBezier") {
+      const bend = smooth.roundness * (to.y - from.y);
+      return {
+        x: (u * u * u + 3 * u * u * t) * from.x + (3 * u * t * t + t * t * t) * to.x,
+        y: u * u * u * from.y + 3 * u * u * t * (from.y + bend) + 3 * u * t * t * (to.y - bend) + t * t * t * to.y
+      };
+    }
+    const factor = 0.5 + 0.5 * smooth.roundness;
+    const radius = Math.hypot(to.x - from.x, to.y - from.y);
+    const angle = Math.atan2(from.y - to.y, to.x - from.x) + (smooth.type === "curvedCW" ? factor : 1 - factor) * Math.PI;
+    const via = { x: from.x + factor * radius * Math.sin(angle), y: from.y + factor * radius * Math.cos(angle) };
+    return {
+      x: u * u * from.x + 2 * u * t * via.x + t * t * to.x,
+      y: u * u * from.y + 2 * u * t * via.y + t * t * to.y
+    };
+  }
+
+  function flowNodeBoxes(network, margin) {
+    const boxes = {};
+    Object.keys(network.getPositions()).forEach((name) => {
+      const box = network.getBoundingBox(name);
+      boxes[name] = { left: box.left - margin, top: box.top - margin, right: box.right + margin, bottom: box.bottom + margin };
+    });
+    return boxes;
+  }
+
+  function flowBoxesOverlap(a, b) {
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  }
+
+  // The area network.fit() shows: the nodes' bounds plus vis-network's 10% margin, widened to the canvas shape.
+  function flowFitBox(network, host) {
+    const boxes = Object.values(flowNodeBoxes(network, 0));
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    if (!boxes.length || !width || !height) return null;
+    const left = Math.min(...boxes.map((box) => box.left));
+    const top = Math.min(...boxes.map((box) => box.top));
+    const right = Math.max(...boxes.map((box) => box.right));
+    const bottom = Math.max(...boxes.map((box) => box.bottom));
+    const scale = Math.min(1, width / (1.1 * Math.max(1, right - left)), height / (1.1 * Math.max(1, bottom - top)));
+    const x = (left + right) / 2;
+    const y = (top + bottom) / 2;
+    return { left: x - width / scale / 2, top: y - height / scale / 2, right: x + width / scale / 2, bottom: y + height / scale / 2 };
+  }
+
+  function flowOutside(box, point) {
+    return Boolean(box) && (point.x < box.left || point.x > box.right || point.y < box.top || point.y > box.bottom);
+  }
+
+  function flowCurvePoints(from, to, smooth) {
+    const points = [];
+    for (let step = 1; step < 20; step += 1) points.push(flowEdgePoint(from, to, smooth, step / 20));
+    return points;
+  }
+
+  function flowPolylineCrossings(a, b) {
+    const side = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+    let crossings = 0;
+    for (let i = 1; i < a.length; i += 1) {
+      for (let j = 1; j < b.length; j += 1) {
+        if (side(a[i - 1], a[i], b[j - 1]) !== side(a[i - 1], a[i], b[j]) && side(b[j - 1], b[j], a[i - 1]) !== side(b[j - 1], b[j], a[i])) crossings += 1;
+      }
+    }
+    return crossings;
+  }
+
+  // Keep each edge clear of the nodes it does not connect. When the default curve passes through one, use the wider
+  // curve on either side that passes through the fewest nodes, stays in view and crosses the fewest other edges.
+  function routeFlowEdges(network, edges, connections, host) {
+    const positions = network.getPositions();
+    const boxes = flowNodeBoxes(network, 8);
+    const view = flowFitBox(network, host);
+    const valid = asArray(connections).filter((connection) => positions[connection.from] && positions[connection.to]
+      && edges.get(flowConnectionKey(connection.from, connection.to)));
+    const curves = {};
+    valid.forEach((connection) => {
+      const id = flowConnectionKey(connection.from, connection.to);
+      curves[id] = flowCurvePoints(positions[connection.from], positions[connection.to], edges.get(id).smooth);
+    });
+    const updates = valid.map((connection) => {
+      const id = flowConnectionKey(connection.from, connection.to);
+      const from = positions[connection.from];
+      const to = positions[connection.to];
+      const obstacles = Object.keys(boxes).filter((name) => name !== connection.from && name !== connection.to).map((name) => boxes[name]);
+      const blocked = (points) => points.filter((point) => flowOutside(view, point)
+        || obstacles.some((box) => point.x > box.left && point.x < box.right && point.y > box.top && point.y < box.bottom)).length;
+      const options = flowSmoothOptions(connection, connections, from, to);
+      let best = null;
+      options.some((smooth, index) => {
+        const points = flowCurvePoints(from, to, smooth);
+        let score = blocked(points);
+        if (index === 0 && score === 0) {
+          best = { smooth };
+          return true;
+        }
+        Object.keys(curves).forEach((other) => {
+          if (other !== id) score += flowPolylineCrossings(points, curves[other]);
+        });
+        if (!best || score < best.score) best = { smooth, score };
+        return false;
+      });
+      return { id, smooth: best.smooth };
+    });
+    edges.update(updates);
+  }
+
+  // vis-network always centres an edge label on the curve midpoint; this draws labels instead and slides each one
+  // along its edge, centred on it or beside it, until it clears the nodes and the labels already placed.
+  function drawFlowLabels(ctx, network, edges, connections, theme, host) {
+    const positions = network.getPositions();
+    const boxes = flowNodeBoxes(network, 4);
+    const view = flowFitBox(network, host);
+    const taken = Object.keys(boxes).map((name) => boxes[name]);
+    const lineHeight = 13;
+    ctx.save();
+    ctx.font = "11px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const labelled = asArray(connections).filter((connection) => connection.label && positions[connection.from] && positions[connection.to]);
+    const length = (connection) => Math.hypot(positions[connection.to].x - positions[connection.from].x, positions[connection.to].y - positions[connection.from].y);
+    // Short edges have the least room to move a label, so they choose first.
+    labelled.sort((a, b) => length(a) - length(b)).forEach((connection) => {
+      const edge = edges.get(flowConnectionKey(connection.from, connection.to));
+      const from = positions[connection.from];
+      const to = positions[connection.to];
+      if (!edge) return;
+      const lines = flowDisplayLabel(connection.label).split("\n");
+      const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 8;
+      const height = lines.length * lineHeight + 4;
+      const curved = edge.smooth.type !== "cubicBezier";
+      let best = null;
+      FLOW_LABEL_POSITIONS.some((t) => {
+        const point = flowEdgePoint(from, to, edge.smooth, t);
+        const ahead = flowEdgePoint(from, to, edge.smooth, t + 0.02);
+        // Beside a steep stretch means left or right of it; beside a flat stretch means above or below it.
+        const steep = Math.abs(ahead.y - point.y) >= Math.abs(ahead.x - point.x);
+        const bend = steep ? point.x - (from.x + (to.x - from.x) * t) : point.y - (from.y + (to.y - from.y) * t);
+        const outside = bend >= 0 ? 1 : -1;
+        // A curved edge (reciprocal or routed around a node) keeps its label on the outside of its bend.
+        const sides = curved ? [outside, 0, -outside] : [0, outside, -outside];
+        return sides.some((side) => {
+          const x = point.x + (steep ? side * (width / 2 + 4) : 0);
+          const y = point.y + (steep ? 0 : side * (height / 2 + 4));
+          const box = { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
+          const collisions = taken.filter((other) => flowBoxesOverlap(box, other)).length
+            + (flowOutside(view, { x: box.left, y: box.top }) || flowOutside(view, { x: box.right, y: box.bottom }) ? 1 : 0);
+          if (!best || collisions < best.collisions) best = { x, box, collisions };
+          return collisions === 0;
+        });
+      });
+      taken.push(best.box);
+      ctx.fillStyle = theme.labelBackground;
+      ctx.fillRect(best.box.left, best.box.top, width, height);
+      ctx.fillStyle = theme.muted;
+      lines.forEach((line, index) => ctx.fillText(line, best.x, best.box.top + 2 + lineHeight * (index + 0.5)));
+    });
+    ctx.restore();
   }
 
   function artifactText(artifact) {
