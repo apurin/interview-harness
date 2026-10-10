@@ -2549,7 +2549,6 @@
       this.flowViewCleanups = [];
       this.sequenceCleanups = [];
       this.codeEditors = [];
-      this.frameObjectUrls = [];
       this.columnFrameCleanups = [];
       this.phoneFrameObserver = null;
       this.exportTimer = null;
@@ -2603,7 +2602,6 @@
     afterRender() {
       requestAnimationFrame(() => {
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
-        this.initFrameLinks();
         this.initPhoneFrames();
         this.initColumnFrames();
         this.initSortables();
@@ -3114,10 +3112,6 @@
       });
       this.columnFrameCleanups = [];
       if (this.phoneFrameObserver) this.phoneFrameObserver.disconnect();
-      this.frameObjectUrls.forEach((url) => {
-        try { global.URL.revokeObjectURL(url); } catch (_) {}
-      });
-      this.frameObjectUrls = [];
     }
 
     initColumnFrames() {
@@ -3215,21 +3209,6 @@
         ? rect.left - view.left
         : rect.right > view.right + 1 ? Math.min(rect.right - view.right, rect.left - view.left) : 0;
       if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
-    }
-
-    initFrameLinks() {
-      this.root.querySelectorAll("[data-frame-srcdoc]").forEach((link) => {
-        const srcdoc = link.dataset.frameSrcdoc || "";
-        if (!srcdoc) return;
-        let url = "";
-        try {
-          if (global.Blob && global.URL && global.URL.createObjectURL) {
-            url = global.URL.createObjectURL(new global.Blob([srcdoc], { type: "text/html;charset=utf-8" }));
-            this.frameObjectUrls.push(url);
-          }
-        } catch (_) {}
-        link.href = url || `data:text/html;charset=utf-8,${encodeURIComponent(srcdoc)}`;
-      });
     }
 
     initSortables() {
