@@ -332,10 +332,7 @@
 
   function createInitialState(config) {
     const answers = Object.fromEntries(config.questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
-    const columnWidths = Object.fromEntries(config.questions
-      .filter(isColumnWidthQuestion)
-      .map((questionDef) => [questionDef.id, questionDef.columnWidth || "narrow"]));
-    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths, commentEditor: null, detailPopover: null, answers, closingNote: "" };
+    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths: {}, commentEditor: null, detailPopover: null, answers, closingNote: "" };
   }
 
   function initialAnswer(questionDef) {
@@ -353,10 +350,8 @@
         .map((questionDef) => [questionDef.id, "table"])),
       columnWidths: Object.fromEntries(questions
         .filter(isColumnWidthQuestion)
-        .map((questionDef) => {
-          const savedWidth = columnWidthValue(safeObject(saved.columnWidths)[questionDef.id]);
-          return [questionDef.id, savedWidth || safeObject(current.columnWidths)[questionDef.id] || questionDef.columnWidth || "narrow"];
-        })),
+        .map((questionDef) => [questionDef.id, columnWidthValue(safeObject(saved.columnWidths)[questionDef.id])])
+        .filter((entry) => entry[1])),
       commentEditor: null,
       detailPopover: null,
       answers: Object.assign({}, current.answers),
@@ -896,7 +891,9 @@
     .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
     .ih-html-preview .ih-mini-callout { border-left: 0; padding: 8px 10px; background: var(--ih-surface-2); color: var(--ih-ink); }
     .ih-evaluation-board {
-      --ih-evaluation-column-width: 298px;
+      --ih-evaluation-column-width: 220px;
+      --ih-column-fade: color-mix(in srgb, var(--ih-surface) 88%, var(--ih-bg));
+      container-type: inline-size;
       min-width: 0;
       border-radius: var(--ih-radius);
       background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
@@ -905,7 +902,7 @@
     .ih-evaluation-board[data-column-width="medium"] { --ih-evaluation-column-width: 460px; }
     .ih-evaluation-board[data-column-width="wide"] { --ih-evaluation-column-width: 680px; }
     .ih-evaluation-board[data-preview-frame="phone"][data-column-width="narrow"] { --ih-evaluation-column-width: 440px; }
-    .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
+    .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
     .ih-evaluation-header-frame {
       position: sticky;
@@ -922,14 +919,14 @@
       scrollbar-width: thin;
     }
     .ih-evaluation-table {
-      width: max(100%, calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
-      min-width: calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)));
+      --ih-evaluation-feature-width: clamp(240px, min(28cqw, calc(100cqw - (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)))), 430px);
+      width: max(100%, calc(var(--ih-evaluation-feature-width) + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
+      min-width: calc(var(--ih-evaluation-feature-width) + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)));
       border-collapse: separate;
       border-spacing: 0;
       table-layout: fixed;
     }
-    .ih-evaluation-feature-col { width: 430px; }
-    .ih-evaluation-option-col { width: var(--ih-evaluation-column-width); }
+    .ih-evaluation-feature-col { width: var(--ih-evaluation-feature-width); }
     .ih-evaluation-table th, .ih-evaluation-table td { border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 72%, transparent); border-right: 1px solid color-mix(in srgb, var(--ih-line) 48%, transparent); padding: 11px 12px; text-align: left; vertical-align: top; }
     .ih-evaluation-table td { vertical-align: middle; }
     .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
@@ -977,7 +974,7 @@
     .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
     .ih-evaluation-row-title .ih-comment-button { align-self: start; }
     .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
-    .ih-evaluation-cell-shell { position: relative; width: 100%; min-height: 30px; display: block; }
+    .ih-evaluation-cell-shell { position: relative; width: 100%; min-height: 30px; display: block; padding-right: 24px; }
     .ih-evaluation-cell-shell > .ih-evaluation-detail-button { position: absolute; top: 50%; right: 2px; width: 20px; height: 20px; opacity: .7; transform: translateY(-50%); }
     .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.25; max-width: 100%; overflow-wrap: normal; word-break: normal; }
     .ih-evaluation-cell svg { width: 16px; height: 16px; fill: currentColor; stroke: none; flex: 0 0 auto; }
@@ -1076,15 +1073,49 @@
       align-self: center;
     }
     .ih-grip:active { cursor: grabbing; }
-    .ih-bucket-frame { --ih-bucket-column-width: min(420px, calc(100vw - 64px)); overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
-    .ih-bucket-frame[data-column-width="medium"] { --ih-bucket-column-width: min(600px, calc(100vw - 64px)); }
-    .ih-bucket-frame[data-column-width="wide"] { --ih-bucket-column-width: min(780px, calc(100vw - 64px)); }
-    .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: max-content; }
-    .ih-bucket { width: var(--ih-bucket-column-width); flex: 0 0 var(--ih-bucket-column-width); display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    .ih-bucket-overflow { --ih-bucket-column-width: 220px; --ih-column-fade: var(--ih-bg); }
+    .ih-bucket-overflow[data-column-width="medium"] { --ih-bucket-column-width: min(600px, calc(100vw - 64px)); }
+    .ih-bucket-overflow[data-column-width="wide"] { --ih-bucket-column-width: min(780px, calc(100vw - 64px)); }
+    .ih-bucket-overflow > .ih-column-hints { margin-bottom: 8px; }
+    .ih-bucket-frame { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
+    .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: calc((var(--ih-bucket-count, 1) * var(--ih-bucket-column-width)) + ((var(--ih-bucket-count, 1) - 1) * 12px)); }
+    .ih-bucket { flex: 1 0 var(--ih-bucket-column-width); min-width: 0; display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
     .ih-bucket-view-toolbar { display: flex; justify-content: end; align-self: end; }
+    .ih-column-edges { position: relative; }
+    .ih-column-edges::before,
+    .ih-column-edges::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      z-index: 13;
+      width: 56px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .16s ease;
+    }
+    .ih-column-edges::before { left: var(--ih-column-edge-start, 0px); background: linear-gradient(to right, color-mix(in srgb, var(--ih-ink) 14%, transparent), transparent 8px), linear-gradient(to right, var(--ih-column-fade), transparent); }
+    .ih-column-edges::after { right: 0; background: linear-gradient(to left, color-mix(in srgb, var(--ih-ink) 14%, transparent), transparent 8px), linear-gradient(to left, var(--ih-column-fade), transparent); }
+    .ih-column-edges.is-overflow-start::before,
+    .ih-column-edges.is-overflow-end::after { opacity: 1; }
+    .ih-column-hints { display: flex; flex-wrap: wrap; justify-content: end; gap: 6px; }
+    .ih-column-hints:not(:has(.ih-column-hint:not([hidden]))) { display: none; }
+    .ih-app .ih-column-hint {
+      min-height: 28px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--ih-accent-soft);
+      color: var(--ih-accent);
+      padding: 4px 11px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .ih-app .ih-column-hint:hover { background: color-mix(in srgb, var(--ih-accent) 24%, transparent); }
+    .ih-column-hint[hidden] { display: none; }
     .ih-column-width-control { display: inline-flex; align-items: center; gap: 8px; }
     .ih-column-width-label { color: var(--ih-muted); font-size: 12px; font-weight: 760; }
     .ih-column-width-options {
@@ -1494,7 +1525,6 @@
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ih-evaluation-board { --ih-evaluation-column-width: 275px; }
       .ih-bottom-inner { align-items: stretch; }
       .ih-flow-toolbar-row { align-items: start; }
     }
@@ -1505,6 +1535,8 @@
     @media (max-width: 680px) {
       .ih-question-head { grid-template-columns: minmax(0, 1fr); align-items: start; }
       .ih-question-tools { justify-content: start; }
+      .ih-evaluation-head { grid-template-columns: minmax(0, 1fr); }
+      .ih-column-hints { justify-content: start; }
       .ih-grid[data-column-width] { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection-actions { justify-self: start; }
@@ -1682,32 +1714,35 @@
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
     });
     return `
-      <div class="ih-evaluation-board" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}"${questionDef.previewFrame ? ` data-preview-frame="${escapeAttr(questionDef.previewFrame)}"` : ""}>
+      <div class="ih-evaluation-board"${renderColumnFrameAttrs(questionDef, instance)}${questionDef.previewFrame ? ` data-preview-frame="${escapeAttr(questionDef.previewFrame)}"` : ""}>
         <div class="ih-evaluation-head">
           <p class="ih-evaluation-note">Select one column. Comment on columns or criteria when the comparison needs clarification.</p>
+          ${renderColumnHints()}
         </div>
-        <div class="ih-evaluation-header-frame" data-evaluation-header-frame>
-          <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
-            <colgroup>
-              <col class="ih-evaluation-feature-col">
-              ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
-            </colgroup>
-            <thead>
-              <tr>
-                <th class="ih-evaluation-feature-head" aria-label="Rows"></th>
-                ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
-              </tr>
-            </thead>
-          </table>
-        </div>
-        <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
-          <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
-            <colgroup>
-              <col class="ih-evaluation-feature-col">
-              ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
-            </colgroup>
-            <tbody>${body.join("")}</tbody>
-          </table>
+        <div class="ih-column-edges">
+          <div class="ih-evaluation-header-frame" data-evaluation-header-frame>
+            <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
+              <colgroup>
+                <col class="ih-evaluation-feature-col">
+                ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="ih-evaluation-feature-head" aria-label="Rows"></th>
+                  ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
+                </tr>
+              </thead>
+            </table>
+          </div>
+          <div class="ih-evaluation-frame" data-column-frame tabindex="0" aria-label="Evaluation table">
+            <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
+              <colgroup>
+                <col class="ih-evaluation-feature-col">
+                ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
+              </colgroup>
+              <tbody>${body.join("")}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
@@ -1828,27 +1863,47 @@
     `;
   }
 
+  function renderColumnFrameAttrs(questionDef, instance) {
+    const width = instance.columnWidth(questionDef.id);
+    const fit = width !== "narrow" && !instance.hasColumnWidthChoice(questionDef.id);
+    return ` data-column-overflow data-column-width="${escapeAttr(width)}"${fit ? ` data-column-fit="${escapeAttr(width)}"` : ""}`;
+  }
+
+  function renderColumnHints() {
+    return `
+      <div class="ih-column-hints">
+        <button class="ih-column-hint" type="button" data-action="scroll-columns" data-direction="-1" hidden></button>
+        <button class="ih-column-hint" type="button" data-action="scroll-columns" data-direction="1" hidden></button>
+      </div>
+    `;
+  }
+
   function renderBucketBoard(questionDef, answer, instance) {
     const groups = bucketGroups(questionDef, answer);
     const unset = groups.get("");
 
     return `
-      <div class="ih-bucket-frame" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}" tabindex="0" aria-label="Buckets">
-        <div class="ih-bucket-board">
-          <section class="ih-bucket" data-bucket-id="">
-            <div class="ih-bucket-title">Unsorted</div>
-            <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="">
-              ${unset.length ? unset.map((entry) => renderBucketCard(questionDef, answer, entry, 0)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText("", "board")}</div>`}
+      <div class="ih-bucket-overflow"${renderColumnFrameAttrs(questionDef, instance)} style="--ih-bucket-count: ${questionDef.buckets.length + 1}">
+        ${renderColumnHints()}
+        <div class="ih-column-edges">
+          <div class="ih-bucket-frame" data-column-frame tabindex="0" aria-label="Buckets">
+            <div class="ih-bucket-board">
+              <section class="ih-bucket" data-bucket-id="">
+                <div class="ih-bucket-title">Unsorted</div>
+                <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="">
+                  ${unset.length ? unset.map((entry) => renderBucketCard(questionDef, answer, entry, 0)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText("", "board")}</div>`}
+                </div>
+              </section>
+              ${questionDef.buckets.map((bucket) => `
+                <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
+                  <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
+                  <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
+                    ${groups.get(bucket.id).length ? groups.get(bucket.id).map((entry, index) => renderBucketCard(questionDef, answer, entry, index + 1)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "board")}</div>`}
+                  </div>
+                </section>
+              `).join("")}
             </div>
-          </section>
-          ${questionDef.buckets.map((bucket) => `
-            <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
-              <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
-              <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
-                ${groups.get(bucket.id).length ? groups.get(bucket.id).map((entry, index) => renderBucketCard(questionDef, answer, entry, index + 1)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "board")}</div>`}
-              </div>
-            </section>
-          `).join("")}
+          </div>
         </div>
       </div>
     `;
@@ -2142,6 +2197,18 @@
     return cards.some((card) => card.markdown) ? "auto" : "stack";
   }
 
+  function columnFrameView(frame) {
+    const rect = frame.getBoundingClientRect();
+    const left = rect.left + frame.clientLeft;
+    const row = frame.querySelector(".ih-evaluation-table > tbody > tr");
+    const rowHead = row && row.querySelector(":scope > th");
+    return {
+      left: rowHead ? rowHead.getBoundingClientRect().right : left,
+      right: left + frame.clientWidth,
+      columns: Array.from(row ? row.querySelectorAll(":scope > td") : frame.querySelectorAll(".ih-bucket-board > .ih-bucket"))
+    };
+  }
+
   function isColumnWidthQuestion(questionDef) {
     return Boolean(questionDef && ["choice", "evaluation", "bucket"].includes(questionDef.type));
   }
@@ -2411,7 +2478,7 @@
       this.sequenceCleanups = [];
       this.codeEditors = [];
       this.frameObjectUrls = [];
-      this.evaluationScrollCleanups = [];
+      this.columnFrameCleanups = [];
       this.phoneFrameObserver = null;
       this.exportTimer = null;
       this.toastTimer = null;
@@ -2463,7 +2530,7 @@
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
         this.initFrameLinks();
         this.initPhoneFrames();
-        this.initEvaluationHeaderScroll();
+        this.initColumnFrames();
         this.initSortables();
         this.initFlowEditors();
         this.initSequenceEditors();
@@ -2489,6 +2556,10 @@
       return columnWidthValue(safeObject(this.state.columnWidths)[questionId])
         || context && context.questionDef.columnWidth
         || "narrow";
+    }
+
+    hasColumnWidthChoice(questionId) {
+      return Boolean(columnWidthValue(safeObject(this.state.columnWidths)[questionId]));
     }
 
     setTheme(theme, persist = true) {
@@ -2551,6 +2622,7 @@
         event.preventDefault();
         return this.toggleMoveMenu(actionEl);
       }
+      if (action === "scroll-columns") return this.scrollColumns(actionEl);
 
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
@@ -2958,10 +3030,10 @@
         try { view.destroy(); } catch (_) {}
       });
       this.codeEditors = [];
-      this.evaluationScrollCleanups.forEach((cleanup) => {
+      this.columnFrameCleanups.forEach((cleanup) => {
         try { cleanup(); } catch (_) {}
       });
-      this.evaluationScrollCleanups = [];
+      this.columnFrameCleanups = [];
       if (this.phoneFrameObserver) this.phoneFrameObserver.disconnect();
       this.phoneFrameObserver = null;
       this.frameObjectUrls.forEach((url) => {
@@ -2970,15 +3042,22 @@
       this.frameObjectUrls = [];
     }
 
-    initEvaluationHeaderScroll() {
-      this.root.querySelectorAll(".ih-evaluation-board").forEach((board) => {
-        const frame = board.querySelector(".ih-evaluation-frame");
-        const header = board.querySelector("[data-evaluation-header-frame]");
-        if (!frame || !header) return;
-        const sync = () => { header.scrollLeft = frame.scrollLeft; };
-        frame.addEventListener("scroll", sync, { passive: true });
-        this.evaluationScrollCleanups.push(() => frame.removeEventListener("scroll", sync));
-        sync();
+    initColumnFrames() {
+      this.root.querySelectorAll("[data-column-overflow]").forEach((board) => {
+        const frame = board.querySelector("[data-column-frame]");
+        if (!frame) return;
+        const update = () => this.updateColumnOverflow(board);
+        const refit = () => {
+          this.fitColumns(board);
+          update();
+        };
+        frame.addEventListener("scroll", update, { passive: true });
+        global.addEventListener("resize", refit);
+        this.columnFrameCleanups.push(() => {
+          frame.removeEventListener("scroll", update);
+          global.removeEventListener("resize", refit);
+        });
+        refit();
       });
     }
 
@@ -2996,6 +3075,75 @@
       if (!global.ResizeObserver) return;
       this.phoneFrameObserver = new global.ResizeObserver((entries) => entries.forEach((entry) => fit(entry.target)));
       fits.forEach((element) => this.phoneFrameObserver.observe(element));
+    }
+
+    fitColumns(board) {
+      const preset = board.dataset.columnFit;
+      const frame = board.querySelector("[data-column-frame]");
+      if (!preset || !frame) return;
+      const overflows = () => frame.scrollWidth > frame.clientWidth + 1;
+      board.dataset.columnWidth = preset;
+      if (overflows()) {
+        board.dataset.columnWidth = "narrow";
+        if (overflows()) board.dataset.columnWidth = preset;
+      }
+      const section = board.closest(".ih-step");
+      if (!section) return;
+      section.querySelectorAll("[data-action='set-column-width']").forEach((button) => {
+        const selected = button.dataset.columnWidth === board.dataset.columnWidth;
+        button.classList.toggle("is-selected", selected);
+        button.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+    }
+
+    updateColumnOverflow(board) {
+      const frame = board.querySelector("[data-column-frame]");
+      const edges = board.querySelector(".ih-column-edges");
+      const header = board.querySelector("[data-evaluation-header-frame]");
+      if (!frame || !edges) return;
+      if (header) header.scrollLeft = frame.scrollLeft;
+      const view = columnFrameView(frame);
+      const before = view.columns.filter((column) => column.getBoundingClientRect().left < view.left - 2).length;
+      const after = view.columns.filter((column) => column.getBoundingClientRect().right > view.right + 2).length;
+      edges.style.setProperty("--ih-column-edge-start", `${Math.round(view.left - frame.getBoundingClientRect().left)}px`);
+      edges.classList.toggle("is-overflow-start", before > 0);
+      edges.classList.toggle("is-overflow-end", after > 0);
+      board.querySelectorAll("[data-action='scroll-columns']").forEach((hint) => {
+        const toStart = hint.dataset.direction === "-1";
+        const count = toStart ? before : after;
+        const label = `${count} more ${count === 1 ? "column" : "columns"}`;
+        hint.hidden = count === 0;
+        hint.textContent = toStart ? `← ${label}` : `${label} →`;
+        hint.setAttribute("aria-label", `${label} to the ${toStart ? "left" : "right"}`);
+      });
+    }
+
+    scrollColumns(hint) {
+      const board = hint.closest("[data-column-overflow]");
+      const frame = board && board.querySelector("[data-column-frame]");
+      if (!frame) return;
+      const view = columnFrameView(frame);
+      if (hint.dataset.direction === "-1") {
+        const previous = view.columns.filter((column) => column.getBoundingClientRect().left < view.left - 2).pop();
+        if (previous) frame.scrollBy({ left: previous.getBoundingClientRect().right - view.right, behavior: "smooth" });
+      } else {
+        const next = view.columns.find((column) => column.getBoundingClientRect().right > view.right + 2);
+        if (next) frame.scrollBy({ left: next.getBoundingClientRect().left - view.left, behavior: "smooth" });
+      }
+    }
+
+    revealEvaluationOption(context, optionId) {
+      const section = this.sectionForContext(context);
+      const frame = section && section.querySelector(".ih-evaluation-frame");
+      if (!frame) return;
+      const view = columnFrameView(frame);
+      const column = view.columns.find((cell) => cell.dataset.optionId === optionId);
+      if (!column) return;
+      const rect = column.getBoundingClientRect();
+      const delta = rect.left < view.left - 1
+        ? rect.left - view.left
+        : rect.right > view.right + 1 ? Math.min(rect.right - view.right, rect.left - view.left) : 0;
+      if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
     }
 
     initFrameLinks() {
@@ -3772,6 +3920,7 @@
       if (!answer || !questionDef || questionDef.type !== "evaluation") return;
       answer.selected = answer.selected === optionId ? "" : optionId;
       this.refreshEvaluationState(context);
+      if (answer.selected) this.revealEvaluationOption(context, answer.selected);
       this.markChanged(answer);
     }
 
