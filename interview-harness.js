@@ -1062,11 +1062,6 @@
     .ih-bucket-card > .ih-bucket-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
     .ih-bucket-card-content { grid-column: 1 / -1; grid-row: 2; min-width: 0; width: 100%; display: grid; gap: 8px; }
     .ih-bucket-card.is-dragging { opacity: .55; }
-    /* In narrow columns the title gets its own row instead of squeezing between the grip and actions. */
-    @container ih-bucket-list (max-width: 279px) {
-      .ih-bucket-card > .ih-option-title { grid-column: 1 / -1; grid-row: 2; }
-      .ih-bucket-card-content { grid-row: 3; }
-    }
     .ih-bucket-position {
       display: inline-grid;
       place-items: center;
@@ -1102,6 +1097,7 @@
     .ih-bucket-frame { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
     .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: calc((var(--ih-bucket-count, 1) * var(--ih-bucket-column-width)) + ((var(--ih-bucket-count, 1) - 1) * 12px)); }
     .ih-bucket { container: ih-bucket / inline-size; flex: 1 0 var(--ih-bucket-column-width); min-width: 0; display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    /* In narrow columns the actions move under the title instead of squeezing beside it. */
     @container ih-bucket (max-width: 320px) {
       .ih-bucket-card { grid-template-columns: 20px minmax(0, 1fr); row-gap: 4px; }
       .ih-bucket-card > .ih-grip { grid-row: 1 / span 2; }
@@ -1109,7 +1105,7 @@
       .ih-bucket-card-content { grid-row: 3; margin-top: 4px; }
     }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
-    .ih-bucket-list { container: ih-bucket-list / inline-size; display: grid; gap: 7px; min-height: 128px; align-content: start; }
+    .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
     .ih-bucket-view-toolbar { display: flex; justify-content: end; align-self: end; }
     .ih-column-edges { position: relative; }
