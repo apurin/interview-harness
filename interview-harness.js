@@ -407,24 +407,20 @@
   }
 
   function appendChoiceAnswer(lines, questionDef, answer) {
-    const selectedIds = asArray(answer.selected);
-    const selectedTitle = (option) => `${option.title}${option.custom ? " (added by user)" : ""}`;
-    if (questionDef.select === "many" && selectedIds.length) {
+    const chosen = chosenOptions(questionDef, answer);
+    const chosenTitle = (entry) => `${oneLine(entry.title)}${entry.custom ? " (added by user)" : ""}`;
+    if (questionDef.select === "many" && chosen.length) {
       lines.push("Selected:");
-      selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean)
-        .forEach((option) => lines.push(`- ${selectedTitle(option)}`));
+      chosen.forEach((entry) => lines.push(`- ${chosenTitle(entry)}`));
     }
-    if (questionDef.select === "one" && answer.selected) {
-      const selected = findOption(questionDef, answer, answer.selected);
-      if (selected) lines.push(`Selected: ${selectedTitle(selected)}`);
-    }
-    const added = asArray(answer.added).filter((entry) => entry.title || selectedIds.includes(entry.id) || optionComment(answer, entry.id));
+    if (questionDef.select === "one" && chosen.length) lines.push(`Selected: ${chosenTitle(chosen[0])}`);
+    const added = writtenOptions(questionDef, answer).filter((entry) => entry.custom);
     if (added.length) {
       lines.push("Added custom options:");
       added.forEach((entry) => {
-        const selected = selectedIds.includes(entry.id) ? "selected" : "not selected";
+        const status = chosen.some((option) => option.id === entry.id) ? "selected" : "not selected";
         const comment = optionComment(answer, entry.id);
-        lines.push(`- ${entry.title} (${selected})${comment ? ` Comment: ${comment}` : ""}`);
+        lines.push(`- ${oneLine(entry.title)} (${status})${comment ? ` Comment: ${comment}` : ""}`);
       });
     }
     appendComments(lines, optionComments(answerOptions(questionDef, answer), answer.comments));
@@ -523,7 +519,7 @@
 
   const answerChangeChecks = {
     choice(questionDef, answer) {
-      return Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length);
+      return Boolean(chosenOptions(questionDef, answer).length || writtenOptions(questionDef, answer).some((entry) => entry.custom) || optionComments(answerOptions(questionDef, answer), answer.comments).length);
     },
     evaluation(questionDef, answer) {
       return Boolean(
@@ -1682,7 +1678,7 @@
     return `
       <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}" data-action="choose-option" tabindex="0">
         <div class="ih-option-top">
-          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
+          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" placeholder="Describe your option" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
           <div class="ih-option-actions">
             ${entry.custom ? "" : renderTooltipButton(entry.title, entry.markdownTooltip)}
             ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on option")}
@@ -3943,10 +3939,10 @@
       if (!questionDef || !answer) return;
       const id = uniqueAddedId(questionDef, answer, title);
       answer.added.push({ id, title });
-      if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
-      if (questionDef.type === "choice" && questionDef.select === "one") answer.selected = id;
+      answer.selected = questionDef.select === "many" ? Array.from(new Set(asArray(answer.selected).concat(id))) : id;
       this.saveChanged(answer);
       this.render();
+      this.focusChoiceCard(context, id);
     }
 
     removeAdded(idOrIndex, context) {
@@ -3958,14 +3954,24 @@
         : numberOr(idOrIndex, -1);
       if (index < 0) return;
       const removed = answer.added[index];
+      const cardIds = answerOptions(questionDef, answer).map((entry) => entry.id);
+      const removedAt = removed ? cardIds.indexOf(removed.id) : -1;
+      const nextFocusId = cardIds[removedAt + 1] || cardIds[removedAt - 1];
       answer.added.splice(index, 1);
       if (removed) {
-        if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
-        if (questionDef.type === "choice" && questionDef.select === "one" && answer.selected === removed.id) answer.selected = "";
+        if (questionDef.select === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
+        else if (answer.selected === removed.id) answer.selected = "";
         if (answer.comments) delete answer.comments[removed.id];
       }
       this.saveChanged(answer);
       this.render();
+      this.focusChoiceCard(context, nextFocusId);
+    }
+
+    focusChoiceCard(context, optionId) {
+      const section = this.sectionForContext(context);
+      const card = section && optionId && section.querySelector(`.ih-choice[data-option-id="${cssEscape(optionId)}"]`);
+      if (card) card.focus();
     }
 
     updateAddedTitle(optionId, title, context) {
@@ -4457,7 +4463,7 @@
   }
 
   const questionAnsweredChecks = {
-    choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
+    choice: (questionDef, answer) => chosenOptions(questionDef, answer).length > 0,
     evaluation: (_questionDef, answer) => Boolean(answer.selected),
     bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(
       answer.buckets && answer.buckets[entry.id] || String(optionComment(answer, entry.id)).trim()
@@ -4526,16 +4532,21 @@
     })).filter((entry) => entry.comment);
   }
 
-  function findOption(questionDef, answer, id) {
-    const entry = answerOptions(questionDef, answer).find((candidate) => candidate.id === id);
-    return entry ? { id: entry.id, title: entry.title, custom: entry.custom } : null;
+  // A custom option the user has emptied stays on the page as a draft but never counts as an answer.
+  function writtenOptions(questionDef, answer) {
+    return answerOptions(questionDef, answer).filter((entry) => oneLine(entry.title));
+  }
+
+  function chosenOptions(questionDef, answer) {
+    const options = writtenOptions(questionDef, answer);
+    return asArray(answer.selected).map((id) => options.find((entry) => entry.id === id)).filter(Boolean);
   }
 
   function normalizeAddedOptions(input) {
     return asArray(input).map((entry, index) => {
       if (typeof entry === "string") return { id: slugify(entry) || `added-${index + 1}`, title: entry };
       const raw = Object.assign({}, entry || {});
-      const title = String(raw.title || raw.label || raw.name || raw.value || `Added option ${index + 1}`);
+      const title = typeof raw.title === "string" ? raw.title : String(raw.label || raw.name || raw.value || `Added option ${index + 1}`);
       return { id: String(raw.id || slugify(title) || `added-${index + 1}`), title };
     });
   }
@@ -5166,6 +5177,10 @@
       .trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
+  }
+
+  function oneLine(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
   }
 
   function normalizeTheme(value) {
