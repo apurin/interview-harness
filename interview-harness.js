@@ -76,13 +76,17 @@
 
   function normalizeConfig(input) {
     const raw = requireObject(input, "interview");
-    assertKnownFields(raw, ["title", "markdownIntro", "questions"], "interview");
-    const title = requiredString(raw.title, "interview.title");
-    const questions = requireArray(raw.questions, "interview.questions", true).map(normalizeQuestion);
+    const problems = [];
+    collectProblem(problems, () => assertKnownFields(raw, ["title", "markdownIntro", "questions"], "interview"));
+    const title = collectProblem(problems, () => requiredString(raw.title, "interview.title"));
+    const questions = (collectProblem(problems, () => requireArray(raw.questions, "interview.questions", true)) || [])
+      .map((question, index) => collectProblem(problems, () => normalizeQuestion(question, index)));
+    const intro = collectProblem(problems, () => optionalString(raw.markdownIntro, "interview.markdownIntro"));
+    throwProblems(problems);
     return {
       target: `#${DEFAULT_TARGET_ID}`,
       title,
-      intro: optionalString(raw.markdownIntro, "interview.markdownIntro"),
+      intro,
       questions,
       storageKey: defaultStorageKey(title),
       copyTextLabel: "Copy text",
@@ -103,13 +107,15 @@
       edit: ["type", "prompt", "value", "language"]
     }[type];
     if (!allowed) throw new TypeError(`${path}.type must be choice, compare, categorize, flow, sequence, or edit.`);
-    assertKnownFields(raw, allowed, path);
+    const problems = [];
+    collectProblem(problems, () => assertKnownFields(raw, allowed, path));
     const id = `q${index + 1}`;
     raw.id = id;
     raw.sourcePath = path;
-    const prompt = requiredString(raw.prompt, `${path}.prompt`);
+    const prompt = collectProblem(problems, () => requiredString(raw.prompt, `${path}.prompt`));
     const normalize = questionNormalizers[type];
-    const normalized = normalize(raw);
+    const normalized = collectProblem(problems, () => normalize(raw));
+    throwProblems(problems);
     return Object.assign({ type: normalized.type || type, id, prompt }, normalized);
   }
 
@@ -1188,6 +1194,12 @@
     .ih-editor-loading { color: var(--ih-muted); font-size: 13px; padding: 12px 0 0; }
 
     .ih-output { min-height: 420px; max-height: 62vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--ih-code-bg); color: var(--ih-code-ink); border-radius: var(--ih-radius); padding: 16px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ih-mount-error { display: grid; gap: 14px; max-width: 980px; }
+    .ih-mount-error .ih-question-head { margin-bottom: 4px; }
+    .ih-mount-error .ih-option-top { align-items: center; }
+    .ih-mount-error-list { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .ih-mount-error-list li::marker { color: var(--ih-danger); }
+    .ih-mount-error-report { min-height: 0; margin: 12px 0 0; }
 
     .ih-bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; border-top: 0; background: color-mix(in srgb, var(--ih-bg) 92%, transparent); box-shadow: 0 -1px 0 rgb(255 255 255 / 4%), 0 -12px 28px rgb(8 14 13 / 16%); backdrop-filter: blur(16px); }
     .ih-bottom-inner { max-width: var(--ih-max); margin: 0 auto; padding: 11px clamp(14px, 3vw, 34px); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
@@ -1994,6 +2006,36 @@
           <pre class="ih-output" data-export-text>${escapeHTML(text)}</pre>
         </div>
       </section>
+    `;
+  }
+
+  function renderMountError(theme, problems, report) {
+    return `
+      <div class="ih-app" data-ih-theme="${escapeAttr(theme)}">
+        <main class="ih-main">
+          <section class="ih-step ih-mount-error" role="alert">
+            <div class="ih-question-head">
+              <div>
+                <p class="ih-kicker">Interview Harness ${escapeHTML(VERSION)}</p>
+                <h1 class="ih-prompt">This interview can't open</h1>
+                <p class="ih-export-note">Copy the report and send it to the agent that generated this interview.</p>
+              </div>
+            </div>
+            <div class="ih-card">
+              <h2 class="ih-option-title">${problems.length === 1 ? "1 problem" : `${problems.length} problems`}</h2>
+              <ul class="ih-mount-error-list">${problems.map((problem) => `<li>${escapeHTML(problem)}</li>`).join("")}</ul>
+            </div>
+            <div class="ih-card">
+              <div class="ih-option-top">
+                <h2 class="ih-option-title">Report</h2>
+                <button class="ih-btn ih-btn-primary" type="button" data-action="copy-error-report">Copy report</button>
+              </div>
+              <pre class="ih-output ih-mount-error-report" data-error-report>${escapeHTML(report)}</pre>
+            </div>
+          </section>
+        </main>
+        <div class="ih-toast" role="status" aria-live="polite"></div>
+      </div>
     `;
   }
 
@@ -3993,7 +4035,43 @@
   }
 
   function mount(input) {
-    return new InterviewHarnessApp(normalizeConfig(input));
+    try {
+      return new InterviewHarnessApp(normalizeConfig(input));
+    } catch (error) {
+      console.error(error);
+      showMountError(error);
+      throw error;
+    }
+  }
+
+  function showMountError(error) {
+    try {
+      const problems = errorProblems(error);
+      const report = [
+        `The interview page failed to open. Interview Harness ${VERSION} reported:`,
+        ...problems.map((problem) => `- ${problem}`),
+        "Fix the interview file and send it again."
+      ].join("\n");
+      const theme = readSharedTheme();
+      applyThemeToDocument(theme);
+      injectStyles();
+      const root = resolveTarget(`#${DEFAULT_TARGET_ID}`);
+      root.innerHTML = renderMountError(theme, problems, report);
+      let toastTimer = null;
+      const toast = (message) => {
+        const node = root.querySelector(".ih-toast");
+        clearTimeout(toastTimer);
+        node.textContent = message;
+        node.classList.add("is-visible");
+        toastTimer = setTimeout(() => node.classList.remove("is-visible"), 1700);
+      };
+      root.querySelector("[data-action='copy-error-report']").addEventListener("click", () => {
+        copyToClipboard(report).then(() => toast("Copied report."), () => {
+          global.getSelection().selectAllChildren(root.querySelector("[data-error-report]"));
+          toast("Copy blocked. Report text selected.");
+        });
+      });
+    } catch (_) {}
   }
 
   function injectStyles() {
@@ -4424,6 +4502,24 @@
   function assertKnownFields(value, allowed, path) {
     const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
     if (unknown.length) throw new TypeError(`${path} contains unknown ${unknown.length === 1 ? "field" : "fields"}: ${unknown.join(", ")}.`);
+  }
+
+  function collectProblem(problems, check) {
+    try {
+      return check();
+    } catch (error) {
+      problems.push(...errorProblems(error));
+      return undefined;
+    }
+  }
+
+  function throwProblems(problems) {
+    if (problems.length) throw Object.assign(new TypeError(problems.join("\n")), { problems });
+  }
+
+  function errorProblems(error) {
+    if (error && Array.isArray(error.problems)) return error.problems;
+    return [String((error && error.message) || error)];
   }
 
   function configFingerprint(value) {
