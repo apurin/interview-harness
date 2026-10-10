@@ -251,9 +251,7 @@
   // State and export logic ---------------------------------------------------
 
   const initialAnswers = {
-    choice: (questionDef) => questionDef.select === "many"
-      ? { selected: [], comments: {}, added: [] }
-      : { selected: "", comments: {} },
+    choice: (questionDef) => ({ selected: questionDef.select === "many" ? [] : "", comments: {}, added: [] }),
     evaluation: (_questionDef) => ({ selected: "", optionComments: {}, rowComments: {}, touched: false }),
     bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
     flow: initialFlowAnswer,
@@ -263,10 +261,9 @@
 
   const answerHydrators = {
     choice(questionDef, answer, saved) {
-      if (questionDef.select !== "many") return;
-      answer.selected = asArray(saved.selected);
+      answer.selected = questionDef.select === "many" ? asArray(saved.selected) : String(asArray(saved.selected)[0] || "");
       answer.added = normalizeAddedOptions(saved.added);
-      answer.touched = Boolean(answer.selected.length || answer.added.length || commentCount(answer));
+      answer.touched = Boolean(asArray(answer.selected).length || answer.added.length || commentCount(answer));
     },
     evaluation(questionDef, answer, saved) {
       answer.optionComments = safeObject(saved.optionComments);
@@ -393,14 +390,15 @@
 
   function appendChoiceAnswer(lines, questionDef, answer) {
     const selectedIds = asArray(answer.selected);
+    const selectedTitle = (option) => `${option.title}${option.custom ? " (added by user)" : ""}`;
     if (questionDef.select === "many" && selectedIds.length) {
       lines.push("Selected:");
       selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean)
-        .forEach((option) => lines.push(`- ${option.title}`));
+        .forEach((option) => lines.push(`- ${selectedTitle(option)}`));
     }
     if (questionDef.select === "one" && answer.selected) {
       const selected = findOption(questionDef, answer, answer.selected);
-      if (selected) lines.push(`Selected: ${selected.title}`);
+      if (selected) lines.push(`Selected: ${selectedTitle(selected)}`);
     }
     const added = asArray(answer.added).filter((entry) => entry.title || selectedIds.includes(entry.id) || optionComment(answer, entry.id));
     if (added.length) {
@@ -503,9 +501,7 @@
 
   const answerChangeChecks = {
     choice(questionDef, answer) {
-      return questionDef.select === "many"
-        ? Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length)
-        : Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
+      return Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length);
     },
     evaluation(questionDef, answer) {
       return Boolean(
@@ -1575,14 +1571,13 @@
     const layoutAttr = Number.isInteger(layout) ? ` data-cards-per-row="${layout}"` : "";
     const widthAttr = gridClass === "ih-grid" ? ` data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}"` : "";
     const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id))).join("");
-    const addRow = multiple ? renderAddRow("Add another option") : "";
+    const addRow = renderAddRow(multiple ? "Add another option" : "Add your own option");
     return `<div class="${gridClass}"${layoutAttr}${widthAttr}>${options}</div>${addRow}`;
   }
 
   function renderChoiceOption(entry, answer, isSelected) {
-    const action = entry.custom ? "" : ` data-action="choose-option" tabindex="0"`;
     return `
-      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}"${action}>
+      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}" data-action="choose-option" tabindex="0">
         <div class="ih-option-top">
           ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
           <div class="ih-option-actions">
@@ -1591,7 +1586,7 @@
             ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
           </div>
         </div>
-        ${renderTags(entry.tags)}
+        ${renderTags(entry.custom ? ["Your option"] : entry.tags)}
         ${renderCardContent(entry)}
       </article>
     `;
@@ -3590,6 +3585,7 @@
       const id = uniqueAddedId(questionDef, answer, title);
       answer.added.push({ id, title });
       if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
+      if (questionDef.type === "choice" && questionDef.select === "one") answer.selected = id;
       this.saveChanged(answer);
       this.render();
     }
@@ -3606,6 +3602,7 @@
       answer.added.splice(index, 1);
       if (removed) {
         if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
+        if (questionDef.type === "choice" && questionDef.select === "one" && answer.selected === removed.id) answer.selected = "";
         if (answer.comments) delete answer.comments[removed.id];
       }
       this.saveChanged(answer);
@@ -4090,7 +4087,7 @@
 
   function findOption(questionDef, answer, id) {
     const entry = answerOptions(questionDef, answer).find((candidate) => candidate.id === id);
-    return entry ? { id: entry.id, title: entry.title } : null;
+    return entry ? { id: entry.id, title: entry.title, custom: entry.custom } : null;
   }
 
   function normalizeAddedOptions(input) {
