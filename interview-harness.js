@@ -63,7 +63,7 @@
   function normalizeChoiceQuestion(raw) {
     if (raw.multiple !== undefined && typeof raw.multiple !== "boolean") throw new TypeError(`${raw.sourcePath}.multiple must be a boolean.`);
     const options = normalizeCards(raw.cards, raw.id, raw.sourcePath);
-    const layout = cardLayout(options);
+    const layout = cardLayout(options, raw.previewFrame);
     const defaultColumnWidth = layout === 2 ? "medium" : layout === 1 ? "wide" : "narrow";
     return {
       select: raw.multiple === true ? "many" : "one",
@@ -95,9 +95,9 @@
     const raw = requireObject(input, path);
     const type = requiredString(raw.type, `${path}.type`).toLowerCase();
     const allowed = {
-      choice: ["type", "prompt", "multiple", "columnWidth", "cards"],
-      compare: ["type", "prompt", "columnWidth", "cards", "criteria"],
-      categorize: ["type", "prompt", "columnWidth", "categories", "cards"],
+      choice: ["type", "prompt", "multiple", "columnWidth", "previewFrame", "cards"],
+      compare: ["type", "prompt", "columnWidth", "previewFrame", "cards", "criteria"],
+      categorize: ["type", "prompt", "columnWidth", "previewFrame", "categories", "cards"],
       flow: ["type", "prompt", "connections"],
       sequence: ["type", "prompt", "source"],
       edit: ["type", "prompt", "value", "language"]
@@ -107,10 +107,12 @@
     const id = `q${index + 1}`;
     raw.id = id;
     raw.sourcePath = path;
+    raw.previewFrame = normalizePreviewFrame(raw.previewFrame, `${path}.previewFrame`);
     const prompt = requiredString(raw.prompt, `${path}.prompt`);
     const normalize = questionNormalizers[type];
     const normalized = normalize(raw);
-    return Object.assign({ type: normalized.type || type, id, prompt }, normalized);
+    const previewFrame = raw.previewFrame ? { previewFrame: raw.previewFrame } : {};
+    return Object.assign({ type: normalized.type || type, id, prompt }, previewFrame, normalized);
   }
 
   function normalizeCards(input, questionId, sourcePath) {
@@ -856,6 +858,12 @@
     .ih-frame-open:hover { background: var(--ih-accent-soft); color: var(--ih-accent); }
     .ih-frame-open svg { width: 14px; height: 14px; }
     .ih-frame { display: block; width: 100%; height: min(54vh, 520px); border: 0; background: var(--ih-surface-2); }
+    .ih-frame-shell.is-phone { overflow: visible; display: grid; gap: 10px; background: transparent; }
+    .ih-frame-shell.is-phone > .ih-frame-bar { border-bottom: 0; border-radius: var(--ih-radius); }
+    .ih-phone-fit { min-width: 0; width: 100%; display: flex; justify-content: center; }
+    .ih-phone { flex: 0 0 auto; align-self: flex-start; padding: 10px; border: 1px solid var(--ih-line-strong); border-radius: 50px; background: #15191a; box-shadow: var(--ih-shadow); transform: scale(var(--ih-phone-scale, 1)); transform-origin: top center; }
+    .ih-phone > iframe { display: block; width: 390px; height: 780px; border: 0; border-radius: 40px; background: #fff; }
+    .ih-bucket-board:has(.is-dragging) iframe { pointer-events: none; }
     .ih-html-preview { overflow: auto; }
     .ih-html-preview > svg { display: block; width: 100%; height: auto; }
     .ih-html-preview > * + * { margin-top: 9px; }
@@ -875,6 +883,7 @@
     }
     .ih-evaluation-board[data-column-width="medium"] { --ih-evaluation-column-width: 460px; }
     .ih-evaluation-board[data-column-width="wide"] { --ih-evaluation-column-width: 680px; }
+    .ih-evaluation-board[data-preview-frame="phone"][data-column-width="narrow"] { --ih-evaluation-column-width: 440px; }
     .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
     .ih-evaluation-header-frame {
@@ -1570,16 +1579,16 @@
   function renderChoice(questionDef, answer, instance) {
     const multiple = questionDef.select === "many";
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
-    const layout = cardLayout(questionDef.options);
+    const layout = cardLayout(questionDef.options, questionDef.previewFrame);
     const gridClass = layout === "stack" ? "ih-stack" : "ih-grid";
     const layoutAttr = Number.isInteger(layout) ? ` data-cards-per-row="${layout}"` : "";
     const widthAttr = gridClass === "ih-grid" ? ` data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}"` : "";
-    const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id))).join("");
+    const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id), questionDef.previewFrame)).join("");
     const addRow = multiple ? renderAddRow("Add another option") : "";
     return `<div class="${gridClass}"${layoutAttr}${widthAttr}>${options}</div>${addRow}`;
   }
 
-  function renderChoiceOption(entry, answer, isSelected) {
+  function renderChoiceOption(entry, answer, isSelected, previewFrame) {
     const action = entry.custom ? "" : ` data-action="choose-option" tabindex="0"`;
     return `
       <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}"${action}>
@@ -1592,7 +1601,7 @@
           </div>
         </div>
         ${renderTags(entry.tags)}
-        ${renderCardContent(entry)}
+        ${renderCardContent(entry, previewFrame)}
       </article>
     `;
   }
@@ -1609,6 +1618,7 @@
   function renderEvaluation(questionDef, answer, instance) {
     const selectedIds = asArray(answer.selected ? [answer.selected] : []);
     const body = [];
+    if (questionDef.previewFrame && questionDef.options.some((entry) => entry.htmlPreview)) body.push(renderEvaluationPreviewRow(questionDef, selectedIds));
     let previousGroup = null;
     questionDef.rows.forEach((row) => {
       if (row.group && row.group !== previousGroup) {
@@ -1618,7 +1628,7 @@
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
     });
     return `
-      <div class="ih-evaluation-board" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}">
+      <div class="ih-evaluation-board" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}"${questionDef.previewFrame ? ` data-preview-frame="${escapeAttr(questionDef.previewFrame)}"` : ""}>
         <div class="ih-evaluation-head">
           <p class="ih-evaluation-note">Select one column. Comment on columns or criteria when the comparison needs clarification.</p>
         </div>
@@ -1656,6 +1666,14 @@
     return `<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell">${escapeHTML(row.group)}</th>${cells}</tr>`;
   }
 
+  // Phone previews are too tall for the sticky column header, so they get the first body row.
+  function renderEvaluationPreviewRow(questionDef, selectedIds) {
+    const cells = questionDef.options.map((optionDef) => {
+      return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column`)}>${renderCardContent(Object.assign({}, optionDef, { markdown: "" }), questionDef.previewFrame)}</td>`;
+    }).join("");
+    return `<tr class="ih-evaluation-preview-row"><th><div class="ih-evaluation-row-title"><span>Preview</span></div></th>${cells}</tr>`;
+  }
+
   function renderEvaluationCellAttrs(optionDef, selectedIds, label) {
     const isSelected = selectedIds.includes(optionDef.id);
     const classAttr = isSelected ? ` class="is-selected"` : "";
@@ -1673,7 +1691,7 @@
           <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
           ${renderEvaluationColumnTags(entry.tags)}
           ${entry.markdown ? `<span class="ih-evaluation-column-markdown ih-markdown">${renderMarkdown(entry.markdown)}</span>` : ""}
-          ${entry.htmlPreview ? renderCardContent(Object.assign({}, entry, { markdown: "" })) : ""}
+          ${entry.htmlPreview && !questionDef.previewFrame ? renderCardContent(Object.assign({}, entry, { markdown: "" })) : ""}
         </div>
       </th>
     `;
@@ -1812,7 +1830,7 @@
           </div>
         </div>
         <div class="ih-bucket-table-content">
-          ${renderCardContent(entry)}
+          ${renderCardContent(entry, questionDef.previewFrame)}
         </div>
       </article>
     `;
@@ -1843,7 +1861,7 @@
         </div>
         <div class="ih-bucket-card-content">
           ${renderTags(entry.tags)}
-          ${renderCardContent(entry)}
+          ${renderCardContent(entry, questionDef.previewFrame)}
         </div>
       </article>
     `;
@@ -1986,7 +2004,8 @@
     `;
   }
 
-  function cardLayout(cards) {
+  function cardLayout(cards, previewFrame) {
+    if (previewFrame && cards.some((card) => card.previewType !== "none")) return 3;
     if (cards.some((card) => card.previewType === "file")) return 1;
     if (cards.some((card) => card.previewType === "inline")) return 2;
     return cards.some((card) => card.markdown) ? "auto" : "stack";
@@ -2000,28 +2019,38 @@
     if (!isColumnWidthQuestion(questionDef)) return false;
     if (questionDef.type === "bucket") return bucketView !== "table";
     if (questionDef.type === "evaluation") return questionDef.options.length > 1;
-    const layout = cardLayout(questionDef.options);
+    const layout = cardLayout(questionDef.options, questionDef.previewFrame);
     return questionDef.options.length > 1 && layout !== "stack" && layout !== 1;
   }
 
-  function renderCardContent(card) {
+  function renderCardContent(card, previewFrame) {
     const parts = [];
     if (card.markdown) parts.push(`<div class="ih-rich ih-markdown">${renderMarkdown(card.markdown)}</div>`);
-    if (card.previewType === "inline") parts.push(`<div class="ih-html-preview">${card.htmlPreview}</div>`);
-    if (card.previewType === "file") parts.push(renderFilePreview(card));
+    if (card.previewType === "inline") parts.push(previewFrame ? renderSrcdocPreview(card) : `<div class="ih-html-preview">${card.htmlPreview}</div>`);
+    if (card.previewType === "file") parts.push(renderFilePreview(card, previewFrame));
     return parts.join("");
   }
 
-  function renderFilePreview(card) {
+  function renderFilePreview(card, previewFrame) {
     const src = card.htmlPreview.slice("file:".length).trim();
     const sourceName = frameSourceName(src) || card.title;
-    return `<div class="ih-frame-shell">
+    const frame = `<iframe class="ih-frame" title="${escapeAttr(card.title)}" src="${escapeAttr(src)}"></iframe>`;
+    return `<div class="ih-frame-shell${previewFrame ? " is-phone" : ""}">
       <div class="ih-frame-bar">
         <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
         <a class="ih-frame-open" href="${escapeAttr(src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>
       </div>
-      <iframe class="ih-frame" title="${escapeAttr(card.title)}" src="${escapeAttr(src)}"></iframe>
+      ${previewFrame ? renderPhoneFrame(frame) : frame}
     </div>`;
+  }
+
+  function renderSrcdocPreview(card) {
+    const html = /^\s*<!doctype/i.test(card.htmlPreview) ? card.htmlPreview : `<!doctype html>${card.htmlPreview}`;
+    return renderPhoneFrame(`<iframe title="${escapeAttr(card.title)}" srcdoc="${escapeAttr(html)}"></iframe>`);
+  }
+
+  function renderPhoneFrame(iframe) {
+    return `<div class="ih-phone-fit"><div class="ih-phone">${iframe}</div></div>`;
   }
 
   function renderTooltipButton(title, markdown) {
@@ -2247,6 +2276,7 @@
       this.codeEditors = [];
       this.frameObjectUrls = [];
       this.evaluationScrollCleanups = [];
+      this.phoneFrameObserver = null;
       this.exportTimer = null;
       this.toastTimer = null;
       this.onDocumentKeydown = (event) => this.onKeydown(event);
@@ -2296,6 +2326,7 @@
       requestAnimationFrame(() => {
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
         this.initFrameLinks();
+        this.initPhoneFrames();
         this.initEvaluationHeaderScroll();
         this.initSortables();
         this.initFlowEditors();
@@ -2787,6 +2818,8 @@
         try { cleanup(); } catch (_) {}
       });
       this.evaluationScrollCleanups = [];
+      if (this.phoneFrameObserver) this.phoneFrameObserver.disconnect();
+      this.phoneFrameObserver = null;
       this.frameObjectUrls.forEach((url) => {
         try { global.URL.revokeObjectURL(url); } catch (_) {}
       });
@@ -2803,6 +2836,22 @@
         this.evaluationScrollCleanups.push(() => frame.removeEventListener("scroll", sync));
         sync();
       });
+    }
+
+    initPhoneFrames() {
+      const fits = Array.from(this.root.querySelectorAll(".ih-phone-fit"));
+      if (!fits.length) return;
+      // Scale the fixed-size phone down to its container; the iframe keeps its 390px viewport.
+      const fit = (element) => {
+        const phone = element.firstElementChild;
+        const scale = Math.min(1, element.clientWidth / phone.offsetWidth) || 1;
+        element.style.setProperty("--ih-phone-scale", String(scale));
+        element.style.height = scale < 1 ? `${phone.offsetHeight * scale}px` : "";
+      };
+      fits.forEach(fit);
+      if (!global.ResizeObserver) return;
+      this.phoneFrameObserver = new global.ResizeObserver((entries) => entries.forEach((entry) => fit(entry.target)));
+      fits.forEach((element) => this.phoneFrameObserver.observe(element));
     }
 
     initFrameLinks() {
@@ -4401,6 +4450,12 @@
     const width = columnWidthValue(value);
     if (!width) throw new TypeError(`${path} must be narrow, medium, or wide.`);
     return width;
+  }
+
+  function normalizePreviewFrame(value, path) {
+    if (value === undefined || value === null) return "";
+    if (value !== "phone") throw new TypeError(`${path} must be phone.`);
+    return value;
   }
 
   function assertKnownFields(value, allowed, path) {
