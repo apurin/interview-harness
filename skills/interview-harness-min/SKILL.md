@@ -5,15 +5,15 @@ description: Create a local visual interview from already-planned questions usin
 
 # Interview Harness
 
-Create one local HTML interview that lets the user select, comment on, correct, and refine generated material. Load the harness from `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v6.0.1/interview-harness.js`. This skill is the complete authoring reference; do not read or copy the library source.
+Create one local HTML interview that lets the user select, comment on, correct, and refine generated material. Load the harness from `https://cdn.jsdelivr.net/gh/apurin/interview-harness@v7.0.0/interview-harness.js`. This skill is the complete authoring reference; do not read or copy the library source.
 
 Save the page as a `.html` file and present its path. The user can open it directly in a browser. Do not host it or start a server.
 
 ## Authoring API
 
-Call `InterviewHarness.mount({ title, markdownIntro?, questions })`. Use only documented fields; invalid shapes fail with a path-specific error. The harness creates its own page container, IDs, layout, state, navigation, comments, and export.
+Call `InterviewHarness.mount({ title, markdownIntro?, questions })`. Use only documented fields; an invalid shape renders an error panel that lists the validation problems it detects, with their paths, and a report the user can paste back to you. The harness creates its own page container, IDs, layout, state, navigation, comments, and export. The export lists unanswered questions at the end and, when the user fills the closing field for constraints and topics the questions missed, a “Not covered by the questions” section.
 
-Usually omit `markdownIntro`. When the file itself needs context, use one short sentence that states what the user is reviewing. Put project background, research, rationale, and usage instructions in the reply that links to the interview.
+Usually omit `markdownIntro`. When the file itself needs context, use one short sentence that states what the user is reviewing. Put the context that supports a decision on its cards and in their tooltips.
 
 Every card uses:
 
@@ -27,9 +27,11 @@ Every card uses:
 }
 ```
 
-Put the main card description in `markdown`. Use `markdownTooltip` only for useful secondary context that would impede scanning. Raw `htmlPreview` is shown inline; prefix a local HTML filename with `file:` to show it in a full-width iframe. Layout is automatic: one card per row for file previews, at most two for inline previews, and compact cards without previews.
+Put the main card description in `markdown`. Use `markdownTooltip` only for useful secondary context that would impede scanning. Raw `htmlPreview` is shown inline and shares the page's document and CSS; prefix a local HTML filename with `file:` to show it in a full-width iframe. Previews under `file:` or `previewFrame` are their own documents and load their own fonts and stylesheets. Choice lays out one card per row for file previews, two for inline previews, and compact cards without previews; phone previews and an explicit `columnWidth` override this, and narrow screens reduce the count.
 
-Choice, compare, and categorize questions accept `columnWidth: "narrow" | "medium" | "wide"` to preselect the user-adjustable column width. Choice maps those presets to three, two, or one card per row and preserves its previous automatic count when omitted; compare and categorize default to narrow. Categorize shows the width control only in Board view.
+Choice, compare, and categorize questions accept `previewFrame: "phone"` to show every card preview inside a 390px phone frame. Inline previews then render as their own page, so fonts, linked stylesheets, viewport queries, and right-to-left content behave as on a device, and choice places three framed cards per row at narrow width.
+
+Choice, compare, and categorize questions accept `columnWidth: "narrow" | "medium" | "wide"` to preselect the user-adjustable column width. Choice maps those presets to three, two, or one card per row and preserves its previous automatic count when omitted. Compare and categorize default to narrow, which fits all columns to the page when they can share it. A wider preset that would hide columns uses narrow when narrow fits, otherwise keeps the requested width with a scroll hint, until the user picks a width. Categorize shows the width control only in Board view.
 
 ### Choice
 
@@ -43,7 +45,7 @@ Choice, compare, and categorize questions accept `columnWidth: "narrow" | "mediu
 }
 ```
 
-Multiple choice also lets the user add an option.
+Single and multiple choice let the user add their own option; the export marks it as added by the user. Do not add an “Other” or “None of these” card.
 
 ### Compare
 
@@ -77,6 +79,7 @@ Each criterion has one positional value per card. A value is Markdown text or `{
   type: "categorize",
   prompt: "Place each capability in the release plan.",
   columnWidth: "medium", // optional; applies to Board view
+  ordered: true, // optional; the user orders cards within a category and the export numbers them
   categories: ["Now", "Next", "Later"],
   cards: [card, card]
 }
@@ -98,7 +101,7 @@ Use flow to correct topology: meaningful stages, states, decisions, and allowed 
 }
 ```
 
-Label connections when the label distinguishes a transition or decision outcome.
+Label connections when the label distinguishes a transition or decision outcome. Each from→to pair appears once.
 
 ### Sequence
 
@@ -141,7 +144,7 @@ Write stable Lines & Arrows source:
 
 ### Edit
 
-An edit question must contain one cohesive artifact that the user can revise independently. Never use it as a cumulative project summary, constitution, or repetition of decisions handled elsewhere. Split independent sections into separate edit questions. Produce the complete synthesis after the user returns the interview.
+An edit question must contain one cohesive artifact that the user can revise independently, or accept as proposed; the export marks acceptance. Never use it as a cumulative project summary, constitution, or repetition of decisions handled elsewhere. Split independent sections into separate edit questions. The synthesis comes after the interview ends, never inside an edit question. `language` highlights `markdown`, `html`, `json`, and `javascript`; other values render as plain text.
 
 ```js
 {
@@ -163,7 +166,7 @@ An edit question must contain one cohesive artifact that the user can revise ind
     <title>Interview title</title>
   </head>
   <body>
-    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v6.0.1/interview-harness.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/apurin/interview-harness@v7.0.0/interview-harness.js"></script>
     <script>
       InterviewHarness.mount({
         title: "Interview title",
