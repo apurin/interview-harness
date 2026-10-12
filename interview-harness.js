@@ -11,6 +11,10 @@
   const THEME_STORAGE_KEY = "interview-harness:theme";
   const THEME_WINDOW_NAME_PREFIX = "__IH_THEME__:";
   const COLUMN_WIDTHS = ["narrow", "medium", "wide"];
+  const FLOW_NODE_HEIGHT = 52;
+  const FLOW_LABEL_LINE_CHARS = 28;
+  const FLOW_LABEL_PHRASE_STARTS = new Set("and or but so then because if when unless while until once after before by for from in into on onto to with within without over under at via through during since per between".split(" "));
+  const FLOW_LABEL_POSITIONS = [0.5, 0.46, 0.54, 0.42, 0.58, 0.38, 0.62, 0.34, 0.66, 0.3, 0.7, 0.26, 0.74, 0.22, 0.78, 0.18, 0.82];
   const SORTABLE_URL = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js";
   const VIS_NETWORK_URL = "https://cdn.jsdelivr.net/npm/vis-network@10.1.0/standalone/umd/vis-network.min.js";
   const LINES_AND_ARROWS_URL = "https://cdn.jsdelivr.net/npm/lines-and-arrows@0.15.0/dist/lines-and-arrows.auto.min.js";
@@ -42,12 +46,7 @@
       options: normalizeCards(raw.cards, raw.id, raw.sourcePath),
       rows: normalizeCriteria(raw.criteria, raw.id, raw.sourcePath, asArray(raw.cards).length)
     }),
-    categorize: (raw) => ({
-      type: "bucket",
-      columnWidth: normalizeColumnWidth(raw.columnWidth, `${raw.sourcePath}.columnWidth`),
-      buckets: normalizeCategories(raw.categories, raw.id, raw.sourcePath),
-      options: normalizeCards(raw.cards, raw.id, raw.sourcePath)
-    }),
+    categorize: normalizeCategorizeQuestion,
     flow: (raw) => ({
       connections: normalizeFlowConnections(raw.connections, true, raw.sourcePath)
     }),
@@ -63,7 +62,7 @@
   function normalizeChoiceQuestion(raw) {
     if (raw.multiple !== undefined && typeof raw.multiple !== "boolean") throw new TypeError(`${raw.sourcePath}.multiple must be a boolean.`);
     const options = normalizeCards(raw.cards, raw.id, raw.sourcePath);
-    const layout = cardLayout(options);
+    const layout = cardLayout(options, raw.previewFrame);
     const defaultColumnWidth = layout === 2 ? "medium" : layout === 1 ? "wide" : "narrow";
     return {
       select: raw.multiple === true ? "many" : "one",
@@ -72,17 +71,34 @@
     };
   }
 
+  function normalizeCategorizeQuestion(raw) {
+    if (raw.ordered !== undefined && typeof raw.ordered !== "boolean") throw new TypeError(`${raw.sourcePath}.ordered must be a boolean.`);
+    const question = {
+      type: "bucket",
+      columnWidth: normalizeColumnWidth(raw.columnWidth, `${raw.sourcePath}.columnWidth`),
+      buckets: normalizeCategories(raw.categories, raw.id, raw.sourcePath),
+      options: normalizeCards(raw.cards, raw.id, raw.sourcePath)
+    };
+    // Omit the default so unordered questions keep their config fingerprint and saved answers.
+    if (raw.ordered) question.ordered = true;
+    return question;
+  }
+
   // Normalization ------------------------------------------------------------
 
   function normalizeConfig(input) {
     const raw = requireObject(input, "interview");
-    assertKnownFields(raw, ["title", "markdownIntro", "questions"], "interview");
-    const title = requiredString(raw.title, "interview.title");
-    const questions = requireArray(raw.questions, "interview.questions", true).map(normalizeQuestion);
+    const problems = [];
+    collectProblem(problems, () => assertKnownFields(raw, ["title", "markdownIntro", "questions"], "interview"));
+    const title = collectProblem(problems, () => requiredString(raw.title, "interview.title"));
+    const questions = (collectProblem(problems, () => requireArray(raw.questions, "interview.questions", true)) || [])
+      .map((question, index) => collectProblem(problems, () => normalizeQuestion(question, index)));
+    const intro = collectProblem(problems, () => optionalString(raw.markdownIntro, "interview.markdownIntro"));
+    throwProblems(problems);
     return {
       target: `#${DEFAULT_TARGET_ID}`,
       title,
-      intro: optionalString(raw.markdownIntro, "interview.markdownIntro"),
+      intro,
       questions,
       storageKey: defaultStorageKey(title),
       copyTextLabel: "Copy text",
@@ -95,22 +111,26 @@
     const raw = requireObject(input, path);
     const type = requiredString(raw.type, `${path}.type`).toLowerCase();
     const allowed = {
-      choice: ["type", "prompt", "multiple", "columnWidth", "cards"],
-      compare: ["type", "prompt", "columnWidth", "cards", "criteria"],
-      categorize: ["type", "prompt", "columnWidth", "categories", "cards"],
+      choice: ["type", "prompt", "multiple", "columnWidth", "previewFrame", "cards"],
+      compare: ["type", "prompt", "columnWidth", "previewFrame", "cards", "criteria"],
+      categorize: ["type", "prompt", "ordered", "columnWidth", "previewFrame", "categories", "cards"],
       flow: ["type", "prompt", "connections"],
       sequence: ["type", "prompt", "source"],
       edit: ["type", "prompt", "value", "language"]
     }[type];
     if (!allowed) throw new TypeError(`${path}.type must be choice, compare, categorize, flow, sequence, or edit.`);
-    assertKnownFields(raw, allowed, path);
+    const problems = [];
+    collectProblem(problems, () => assertKnownFields(raw, allowed, path));
     const id = `q${index + 1}`;
     raw.id = id;
     raw.sourcePath = path;
-    const prompt = requiredString(raw.prompt, `${path}.prompt`);
+    if (allowed.includes("previewFrame")) raw.previewFrame = collectProblem(problems, () => normalizePreviewFrame(raw.previewFrame, `${path}.previewFrame`));
+    const prompt = collectProblem(problems, () => requiredString(raw.prompt, `${path}.prompt`));
     const normalize = questionNormalizers[type];
-    const normalized = normalize(raw);
-    return Object.assign({ type: normalized.type || type, id, prompt }, normalized);
+    const normalized = collectProblem(problems, () => normalize(raw));
+    throwProblems(problems);
+    const previewFrame = raw.previewFrame ? { previewFrame: raw.previewFrame } : {};
+    return Object.assign({ type: normalized.type || type, id, prompt }, previewFrame, normalized);
   }
 
   function normalizeCards(input, questionId, sourcePath) {
@@ -251,22 +271,19 @@
   // State and export logic ---------------------------------------------------
 
   const initialAnswers = {
-    choice: (questionDef) => questionDef.select === "many"
-      ? { selected: [], comments: {}, added: [] }
-      : { selected: "", comments: {} },
+    choice: (questionDef) => ({ selected: questionDef.select === "many" ? [] : "", comments: {}, added: [] }),
     evaluation: (_questionDef) => ({ selected: "", optionComments: {}, rowComments: {}, touched: false }),
-    bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), comments: {} }),
+    bucket: (questionDef) => ({ buckets: objectFrom(questionDef.options, ""), order: questionDef.options.map((entry) => entry.id), comments: {} }),
     flow: initialFlowAnswer,
     sequence: initialSequenceAnswer,
-    edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", touched: false })
+    edit: (questionDef) => ({ content: artifactText(questionDef.artifact), summary: "", confirmed: false, touched: false })
   };
 
   const answerHydrators = {
     choice(questionDef, answer, saved) {
-      if (questionDef.select !== "many") return;
-      answer.selected = asArray(saved.selected);
+      answer.selected = questionDef.select === "many" ? asArray(saved.selected) : String(asArray(saved.selected)[0] || "");
       answer.added = normalizeAddedOptions(saved.added);
-      answer.touched = Boolean(answer.selected.length || answer.added.length || commentCount(answer));
+      answer.touched = Boolean(asArray(answer.selected).length || answer.added.length || commentCount(answer));
     },
     evaluation(questionDef, answer, saved) {
       answer.optionComments = safeObject(saved.optionComments);
@@ -281,6 +298,7 @@
     },
     bucket(questionDef, answer, saved, initial) {
       answer.buckets = Object.assign({}, initial.buckets, safeObject(saved.buckets));
+      answer.order = normalizeBucketOrder(questionDef, saved.order);
       answer.touched = Boolean(Object.values(answer.buckets).some(Boolean) || commentCount(answer));
     },
     flow(questionDef, answer, saved, initial) {
@@ -312,16 +330,14 @@
     },
     edit(questionDef, answer, saved) {
       answer.summary = String(saved.summary || "");
-      answer.touched = Boolean(saved.touched || saved.summary || String(answer.content || "") !== artifactText(questionDef.artifact));
+      answer.confirmed = Boolean(saved.confirmed);
+      answer.touched = Boolean(saved.touched || answer.confirmed || saved.summary || isEditChanged(questionDef, answer));
     }
   };
 
   function createInitialState(config) {
     const answers = Object.fromEntries(config.questions.map((questionDef) => [questionDef.id, initialAnswer(questionDef)]));
-    const columnWidths = Object.fromEntries(config.questions
-      .filter(isColumnWidthQuestion)
-      .map((questionDef) => [questionDef.id, questionDef.columnWidth || "narrow"]));
-    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths, commentEditor: null, detailPopover: null, answers };
+    return { version: VERSION, fingerprint: config.fingerprint, step: 0, viewMode: "paged", bucketViews: {}, columnWidths: {}, commentEditor: null, detailPopover: null, answers, closingNote: "" };
   }
 
   function initialAnswer(questionDef) {
@@ -339,13 +355,12 @@
         .map((questionDef) => [questionDef.id, "table"])),
       columnWidths: Object.fromEntries(questions
         .filter(isColumnWidthQuestion)
-        .map((questionDef) => {
-          const savedWidth = columnWidthValue(safeObject(saved.columnWidths)[questionDef.id]);
-          return [questionDef.id, savedWidth || safeObject(current.columnWidths)[questionDef.id] || questionDef.columnWidth || "narrow"];
-        })),
+        .map((questionDef) => [questionDef.id, columnWidthValue(safeObject(saved.columnWidths)[questionDef.id])])
+        .filter((entry) => entry[1])),
       commentEditor: null,
       detailPopover: null,
-      answers: Object.assign({}, current.answers)
+      answers: Object.assign({}, current.answers),
+      closingNote: typeof saved.closingNote === "string" ? saved.closingNote : current.closingNote
     });
     if (Number.isInteger(saved.step)) next.step = Math.max(0, Math.min(saved.step, questions.length));
     questions.forEach((questionDef) => {
@@ -377,38 +392,43 @@
 
   function buildTextExport(config, state) {
     const lines = [`# ${config.title}`, ""];
+    const closingNote = String(state.closingNote || "").trim();
     let changed = false;
+    const unanswered = [];
     config.questions.forEach((questionDef, index) => {
       const answer = state.answers[questionDef.id];
-      if (!isAnswerChanged(questionDef, answer)) return;
+      if (!isAnswerChanged(questionDef, answer)) {
+        unanswered.push(`- ${index + 1}. ${questionDef.prompt}`);
+        return;
+      }
       changed = true;
       lines.push(`## ${index + 1}. ${questionDef.prompt}`);
       textExporters[questionDef.type](lines, questionDef, answer);
       lines.push("");
     });
-    if (!changed) lines.push("No user changes yet.");
+    if (!changed && !closingNote) lines.push("No user changes yet.");
+    else if (unanswered.length) lines.push("## Not answered", ...unanswered, "");
+    // The note is free text, so it stays last where its headings or fences cannot run into generated sections.
+    if (closingNote) lines.push("## Not covered by the questions", closingNote);
 
     return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
 
   function appendChoiceAnswer(lines, questionDef, answer) {
-    const selectedIds = asArray(answer.selected);
-    if (questionDef.select === "many" && selectedIds.length) {
+    const chosen = chosenOptions(questionDef, answer);
+    const chosenTitle = (entry) => `${oneLine(entry.title)}${entry.custom ? " (added by user)" : ""}`;
+    if (questionDef.select === "many" && chosen.length) {
       lines.push("Selected:");
-      selectedIds.map((id) => findOption(questionDef, answer, id)).filter(Boolean)
-        .forEach((option) => lines.push(`- ${option.title}`));
+      chosen.forEach((entry) => lines.push(`- ${chosenTitle(entry)}`));
     }
-    if (questionDef.select === "one" && answer.selected) {
-      const selected = findOption(questionDef, answer, answer.selected);
-      if (selected) lines.push(`Selected: ${selected.title}`);
-    }
-    const added = asArray(answer.added).filter((entry) => entry.title || selectedIds.includes(entry.id) || optionComment(answer, entry.id));
+    if (questionDef.select === "one" && chosen.length) lines.push(`Selected: ${chosenTitle(chosen[0])}`);
+    const added = writtenOptions(questionDef, answer).filter((entry) => entry.custom);
     if (added.length) {
       lines.push("Added custom options:");
       added.forEach((entry) => {
-        const selected = selectedIds.includes(entry.id) ? "selected" : "not selected";
+        const status = chosen.some((option) => option.id === entry.id) ? "selected" : "not selected";
         const comment = optionComment(answer, entry.id);
-        lines.push(`- ${entry.title} (${selected})${comment ? ` Comment: ${comment}` : ""}`);
+        lines.push(`- ${oneLine(entry.title)} (${status})${comment ? ` Comment: ${comment}` : ""}`);
       });
     }
     appendComments(lines, optionComments(answerOptions(questionDef, answer), answer.comments));
@@ -422,30 +442,42 @@
   }
 
   function appendBucketAnswer(lines, questionDef, answer) {
-    questionDef.buckets.forEach((bucket) => {
-      const options = questionDef.options.filter((entry) => answer.buckets[entry.id] === bucket.id);
-      if (!options.length) return;
-      lines.push(`${bucket.title}:`);
-      options.forEach((entry) => {
+    const groups = bucketGroups(questionDef, answer);
+    // Unordered questions export in authored card order, so moving cards within a column changes nothing.
+    const entriesIn = (bucketId) => questionDef.ordered
+      ? groups.get(bucketId)
+      : questionDef.options.filter((entry) => (answer.buckets[entry.id] || "") === bucketId);
+    const appendGroup = (title, entries, numbered) => {
+      if (!entries.length) return;
+      lines.push(`${title}:`);
+      entries.forEach((entry, index) => {
         const comment = optionComment(answer, entry.id);
-        lines.push(`- ${entry.title}${comment ? ` Comment: ${comment}` : ""}`);
+        lines.push(`${numbered ? `${index + 1}.` : "-"} ${entry.title}${comment ? ` Comment: ${comment}` : ""}`);
       });
-    });
-    const unset = questionDef.options.filter((entry) => !answer.buckets[entry.id] && optionComment(answer, entry.id));
-    if (unset.length) {
-      lines.push("Unsorted:");
-      unset.forEach((entry) => lines.push(`- ${entry.title}`));
-    }
+    };
+    questionDef.buckets.forEach((bucket) => appendGroup(bucket.title, entriesIn(bucket.id), questionDef.ordered));
+    appendGroup("Unsorted", entriesIn("").filter((entry) => optionComment(answer, entry.id)), false);
   }
 
   function appendEditAnswer(lines, questionDef, answer) {
-    if (String(answer.content || "") !== artifactText(questionDef.artifact)) {
+    if (isEditChanged(questionDef, answer)) {
       lines.push("Edited artifact:");
       lines.push("```");
       lines.push(answer.content || "");
       lines.push("```");
+    } else if (answer.confirmed) {
+      lines.push("Status: Accepted as proposed.");
     }
     if (answer.summary) lines.push(`Overall comment: ${answer.summary}`);
+  }
+
+  function isEditChanged(questionDef, answer) {
+    return String(answer && answer.content || "") !== artifactText(questionDef.artifact);
+  }
+
+  function editStatusText(questionDef, answer) {
+    if (isEditChanged(questionDef, answer)) return "Edited.";
+    return answer.confirmed ? "Accepted as proposed." : "Edit the artifact, or accept it as proposed.";
   }
 
   function appendFlowAnswer(lines, questionDef, answer) {
@@ -503,9 +535,7 @@
 
   const answerChangeChecks = {
     choice(questionDef, answer) {
-      return questionDef.select === "many"
-        ? Boolean(asArray(answer.selected).length || asArray(answer.added).length || optionComments(answerOptions(questionDef, answer), answer.comments).length)
-        : Boolean(answer.selected || optionComments(answerOptions(questionDef, answer), answer.comments).length);
+      return Boolean(chosenOptions(questionDef, answer).length || writtenOptions(questionDef, answer).some((entry) => entry.custom) || optionComments(answerOptions(questionDef, answer), answer.comments).length);
     },
     evaluation(questionDef, answer) {
       return Boolean(
@@ -520,7 +550,7 @@
     ),
     flow: (questionDef, answer) => Boolean(answer.confirmed || isFlowChanged(questionDef, answer)),
     sequence: (_questionDef, answer) => Boolean(answer.confirmed || answer.comment),
-    edit: (questionDef, answer) => Boolean(String(answer.content || "") !== artifactText(questionDef.artifact) || answer.summary)
+    edit: (questionDef, answer) => Boolean(answer.confirmed || isEditChanged(questionDef, answer) || answer.summary)
   };
 
   function isAnswerChanged(questionDef, answer) {
@@ -675,7 +705,10 @@
     .ih-question-head > div { min-width: 0; }
     .ih-kicker { margin: 0 0 8px; color: var(--ih-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 850; }
     .ih-prompt { margin: 0; max-width: 980px; font-size: clamp(22px, 2.5vw, 34px); line-height: 1.12; letter-spacing: 0; }
-    .ih-export-note { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
+    .ih-export-note, .ih-question-note { margin: 10px 0 0; max-width: 900px; color: var(--ih-muted); line-height: 1.5; font-size: clamp(14px, 1vw, 16px); }
+    .ih-closing-note { display: grid; gap: 6px; margin-bottom: 14px; }
+    .ih-closing-note-help { margin: 0 0 6px; color: var(--ih-muted); line-height: 1.45; font-size: 14px; }
+    .ih-closing-note .ih-field { min-height: 88px; }
 
     .ih-btn {
       min-height: 36px;
@@ -856,6 +889,17 @@
     .ih-frame-open:hover { background: var(--ih-accent-soft); color: var(--ih-accent); }
     .ih-frame-open svg { width: 14px; height: 14px; }
     .ih-frame { display: block; width: 100%; height: min(54vh, 520px); border: 0; background: var(--ih-surface-2); }
+    .ih-frame-shell.is-phone { overflow: visible; display: grid; gap: 10px; background: transparent; }
+    .ih-frame-shell.is-phone > .ih-frame-bar { border-bottom: 0; border-radius: var(--ih-radius); }
+    /* The phone is 412x802: a 390x780 viewport, a 10px bezel, and a 1px edge. initPhoneFrames scales it to the fit box. */
+    .ih-phone-fit { width: min(100%, 412px); min-width: 0; min-height: 0; aspect-ratio: 412 / 802; margin-inline: auto; }
+    .ih-phone { width: max-content; padding: 10px; border: 1px solid var(--ih-line-strong); border-radius: 50px; background: #15191a; box-shadow: var(--ih-shadow); transform: scale(var(--ih-phone-scale, 1)); transform-origin: top left; }
+    .ih-phone > iframe { display: block; width: 390px; height: 780px; border: 0; border-radius: 40px; background: #fff; }
+    /* Narrow phone boards keep phones at about 70% scale or more and give spare width to the phones, not the criteria. */
+    .ih-evaluation-board[data-preview-frame="phone"][data-column-width="narrow"] { --ih-evaluation-column-width: 312px; }
+    .ih-evaluation-board[data-preview-frame="phone"] .ih-evaluation-table { --ih-evaluation-feature-width: 240px; }
+    .ih-bucket-overflow[data-preview-frame="phone"][data-column-width="narrow"] { --ih-bucket-column-width: 328px; }
+    .ih-bucket-board:has(.is-dragging) iframe { pointer-events: none; }
     .ih-html-preview { overflow: auto; }
     .ih-html-preview > svg { display: block; width: 100%; height: auto; }
     .ih-html-preview > * + * { margin-top: 9px; }
@@ -867,7 +911,9 @@
     .ih-html-preview th { color: var(--ih-ink); font-weight: 850; }
     .ih-html-preview .ih-mini-callout { border-left: 0; padding: 8px 10px; background: var(--ih-surface-2); color: var(--ih-ink); }
     .ih-evaluation-board {
-      --ih-evaluation-column-width: 298px;
+      --ih-evaluation-column-width: 220px;
+      --ih-column-fade: color-mix(in srgb, var(--ih-surface) 88%, var(--ih-bg));
+      container-type: inline-size;
       min-width: 0;
       border-radius: var(--ih-radius);
       background: color-mix(in srgb, var(--ih-surface) 72%, var(--ih-surface-2));
@@ -875,7 +921,7 @@
     }
     .ih-evaluation-board[data-column-width="medium"] { --ih-evaluation-column-width: 460px; }
     .ih-evaluation-board[data-column-width="wide"] { --ih-evaluation-column-width: 680px; }
-    .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
+    .ih-evaluation-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 80%, transparent); }
     .ih-evaluation-note { margin: 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; max-width: 760px; }
     .ih-evaluation-header-frame {
       position: sticky;
@@ -892,14 +938,14 @@
       scrollbar-width: thin;
     }
     .ih-evaluation-table {
-      width: max(100%, calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
-      min-width: calc(430px + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)));
+      --ih-evaluation-feature-width: clamp(240px, min(28cqw, calc(100cqw - (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)))), 430px);
+      width: max(100%, calc(var(--ih-evaluation-feature-width) + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width))));
+      min-width: calc(var(--ih-evaluation-feature-width) + (var(--ih-evaluation-option-count, 3) * var(--ih-evaluation-column-width)));
       border-collapse: separate;
       border-spacing: 0;
       table-layout: fixed;
     }
-    .ih-evaluation-feature-col { width: 430px; }
-    .ih-evaluation-option-col { width: var(--ih-evaluation-column-width); }
+    .ih-evaluation-feature-col { width: var(--ih-evaluation-feature-width); }
     .ih-evaluation-table th, .ih-evaluation-table td { border-bottom: 1px solid color-mix(in srgb, var(--ih-line) 72%, transparent); border-right: 1px solid color-mix(in srgb, var(--ih-line) 48%, transparent); padding: 11px 12px; text-align: left; vertical-align: top; }
     .ih-evaluation-table td { vertical-align: middle; }
     .ih-evaluation-table th:last-child, .ih-evaluation-table td:last-child { border-right: 0; }
@@ -947,7 +993,7 @@
     .ih-evaluation-row-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; color: var(--ih-ink); font-size: 14px; font-weight: 850; line-height: 1.2; }
     .ih-evaluation-row-title .ih-comment-button { align-self: start; }
     .ih-evaluation-table tbody th p { margin: 6px 0 0; color: var(--ih-muted); font-size: 12px; line-height: 1.35; font-weight: 500; }
-    .ih-evaluation-cell-shell { position: relative; width: 100%; min-height: 30px; display: block; }
+    .ih-evaluation-cell-shell { position: relative; width: 100%; min-height: 30px; display: block; padding-right: 24px; }
     .ih-evaluation-cell-shell > .ih-evaluation-detail-button { position: absolute; top: 50%; right: 2px; width: 20px; height: 20px; opacity: .7; transform: translateY(-50%); }
     .ih-evaluation-cell { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; color: var(--ih-ink); font-size: 12px; font-weight: 850; line-height: 1.25; max-width: 100%; overflow-wrap: normal; word-break: normal; }
     .ih-evaluation-cell svg { width: 16px; height: 16px; fill: currentColor; stroke: none; flex: 0 0 auto; }
@@ -1018,6 +1064,22 @@
     .ih-bucket-card > .ih-bucket-actions { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
     .ih-bucket-card-content { grid-column: 1 / -1; grid-row: 2; min-width: 0; width: 100%; display: grid; gap: 8px; }
     .ih-bucket-card.is-dragging { opacity: .55; }
+    .ih-bucket-position {
+      display: inline-grid;
+      place-items: center;
+      min-width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: var(--ih-accent-soft);
+      color: var(--ih-accent);
+      padding: 0 6px;
+      font-size: 12px;
+      font-weight: 850;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      vertical-align: 1px;
+    }
+    .ih-bucket-position[hidden] { display: none; }
     .ih-bucket.is-drop-target { box-shadow: 0 0 0 3px var(--ih-accent-soft); }
     .ih-grip {
       width: 18px;
@@ -1030,15 +1092,56 @@
       align-self: center;
     }
     .ih-grip:active { cursor: grabbing; }
-    .ih-bucket-frame { --ih-bucket-column-width: min(420px, calc(100vw - 64px)); overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
-    .ih-bucket-frame[data-column-width="medium"] { --ih-bucket-column-width: min(600px, calc(100vw - 64px)); }
-    .ih-bucket-frame[data-column-width="wide"] { --ih-bucket-column-width: min(780px, calc(100vw - 64px)); }
-    .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: max-content; }
-    .ih-bucket { width: var(--ih-bucket-column-width); flex: 0 0 var(--ih-bucket-column-width); display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    .ih-bucket-overflow { --ih-bucket-column-width: 220px; --ih-column-fade: var(--ih-bg); }
+    .ih-bucket-overflow[data-column-width="medium"] { --ih-bucket-column-width: min(600px, calc(100vw - 64px)); }
+    .ih-bucket-overflow[data-column-width="wide"] { --ih-bucket-column-width: min(780px, calc(100vw - 64px)); }
+    .ih-bucket-overflow > .ih-column-hints { margin-bottom: 8px; }
+    .ih-bucket-frame { overflow-x: auto; padding-bottom: 4px; overscroll-behavior-x: contain; }
+    .ih-bucket-board { display: flex; align-items: stretch; gap: 12px; min-width: calc((var(--ih-bucket-count, 1) * var(--ih-bucket-column-width)) + ((var(--ih-bucket-count, 1) - 1) * 12px)); }
+    .ih-bucket { container: ih-bucket / inline-size; flex: 1 0 var(--ih-bucket-column-width); min-width: 0; display: grid; grid-template-rows: auto minmax(128px, 1fr); border: 0; border-radius: var(--ih-radius); background: color-mix(in srgb, var(--ih-surface) 74%, var(--ih-surface-2)); padding: 10px; min-height: 180px; }
+    /* In narrow columns the actions move under the title instead of squeezing beside it. */
+    @container ih-bucket (max-width: 320px) {
+      .ih-bucket-card { grid-template-columns: 20px minmax(0, 1fr); row-gap: 4px; }
+      .ih-bucket-card > .ih-grip { grid-row: 1 / span 2; }
+      .ih-bucket-card > .ih-bucket-actions { grid-column: 2; grid-row: 2; justify-self: start; margin-left: -4px; }
+      .ih-bucket-card-content { grid-row: 3; margin-top: 4px; }
+    }
     .ih-bucket-title { font-weight: 850; margin-bottom: 8px; font-size: 14px; }
     .ih-bucket-list { display: grid; gap: 7px; min-height: 128px; align-content: start; }
     .ih-bucket-empty { color: var(--ih-muted); font-size: 12px; padding: 7px 0; }
     .ih-bucket-view-toolbar { display: flex; justify-content: end; align-self: end; }
+    .ih-column-edges { position: relative; }
+    .ih-column-edges::before,
+    .ih-column-edges::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      z-index: 13;
+      width: 56px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .16s ease;
+    }
+    .ih-column-edges::before { left: var(--ih-column-edge-start, 0px); background: linear-gradient(to right, rgb(8 14 13 / 16%), transparent 8px), linear-gradient(to right, var(--ih-column-fade), transparent); }
+    .ih-column-edges::after { right: 0; background: linear-gradient(to left, rgb(8 14 13 / 16%), transparent 8px), linear-gradient(to left, var(--ih-column-fade), transparent); }
+    .ih-column-edges.is-overflow-start::before,
+    .ih-column-edges.is-overflow-end::after { opacity: 1; }
+    .ih-column-hints { display: flex; flex-wrap: wrap; justify-content: end; gap: 6px; }
+    .ih-column-hints:not(:has(.ih-column-hint:not([hidden]))) { display: none; }
+    .ih-app .ih-column-hint {
+      min-height: 28px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--ih-accent-soft);
+      color: var(--ih-accent);
+      padding: 4px 11px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .ih-app .ih-column-hint:hover { background: color-mix(in srgb, var(--ih-accent) 24%, transparent); }
+    .ih-column-hint[hidden] { display: none; }
     .ih-column-width-control { display: inline-flex; align-items: center; gap: 8px; }
     .ih-column-width-label { color: var(--ih-muted); font-size: 12px; font-weight: 760; }
     .ih-column-width-options {
@@ -1120,6 +1223,14 @@
       gap: 6px;
     }
     .ih-bucket-table-content { min-width: 0; display: grid; gap: 8px; }
+    .ih-bucket-table.is-ordered { gap: 18px; }
+    .ih-bucket-table-list { display: grid; gap: 8px; }
+    .ih-bucket-reorder { display: inline-flex; align-items: center; gap: 2px; }
+    .ih-bucket-reorder[hidden] { display: none; }
+    .ih-app .ih-bucket-reorder-button { background: transparent; color: color-mix(in srgb, var(--ih-muted) 82%, var(--ih-surface)); }
+    .ih-bucket-reorder-button svg { width: 18px; height: 18px; display: block; }
+    .ih-app .ih-bucket-reorder-button:hover:not([aria-disabled="true"]) { color: color-mix(in srgb, var(--ih-accent) 56%, var(--ih-muted)); }
+    .ih-bucket-reorder-button[aria-disabled="true"] { opacity: .38; cursor: not-allowed; }
     .ih-bucket-table-content .ih-rich { font-size: 12px; line-height: 1.35; }
     .ih-flow { padding: 0; overflow: hidden; }
     .ih-flow-toolbar { display: grid; gap: 8px; padding: 11px 12px; border-bottom: 1px solid var(--ih-line); background: var(--ih-surface-2); }
@@ -1139,7 +1250,7 @@
     .ih-flow-canvas {
       position: relative;
       width: 100%;
-      height: min(58vh, 620px);
+      height: max(min(58vh, 620px), min(var(--ih-flow-fit-height, 0px), 70vh));
       min-height: 460px;
       background:
         linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
@@ -1163,6 +1274,9 @@
     .ih-sequence-error { margin: 0; padding: 10px 12px; border-top: 1px solid var(--ih-line); color: var(--ih-danger); background: var(--ih-surface-2); font-size: 13px; }
     .ih-sequence-fallback { min-height: 360px; border: 0; border-top: 1px solid var(--ih-line); border-radius: 0; }
     .ih-edit { display: grid; gap: 10px; }
+    .ih-edit .ih-option-top { align-items: center; min-height: 36px; margin-bottom: 8px; }
+    .ih-edit-actions { display: flex; align-items: center; gap: 8px; }
+    .ih-edit-status { margin: 10px 0 0; color: var(--ih-muted); font-size: 13px; line-height: 1.4; }
     .ih-code-editor-host, .ih-code-fallback {
       min-height: 440px;
       border: 0;
@@ -1182,6 +1296,12 @@
     .ih-editor-loading { color: var(--ih-muted); font-size: 13px; padding: 12px 0 0; }
 
     .ih-output { min-height: 420px; max-height: 62vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--ih-code-bg); color: var(--ih-code-ink); border-radius: var(--ih-radius); padding: 16px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ih-mount-error { display: grid; gap: 14px; max-width: 980px; }
+    .ih-mount-error .ih-question-head { margin-bottom: 4px; }
+    .ih-mount-error .ih-option-top { align-items: center; }
+    .ih-mount-error-list { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .ih-mount-error-list li::marker { color: var(--ih-danger); }
+    .ih-mount-error-report { min-height: 0; margin: 12px 0 0; }
 
     .ih-bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; border-top: 0; background: color-mix(in srgb, var(--ih-bg) 92%, transparent); box-shadow: 0 -1px 0 rgb(255 255 255 / 4%), 0 -12px 28px rgb(8 14 13 / 16%); backdrop-filter: blur(16px); }
     .ih-bottom-inner { max-width: var(--ih-max); margin: 0 auto; padding: 11px clamp(14px, 3vw, 34px); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
@@ -1434,7 +1554,6 @@
       .ih-title, .ih-intro { white-space: normal; }
       .ih-prompt { font-size: clamp(22px, 6vw, 32px); }
       .ih-grid[data-cards-per-row="3"], .ih-grid[data-cards-per-row="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ih-evaluation-board { --ih-evaluation-column-width: 275px; }
       .ih-bottom-inner { align-items: stretch; }
       .ih-flow-toolbar-row { align-items: start; }
     }
@@ -1445,10 +1564,12 @@
     @media (max-width: 680px) {
       .ih-question-head { grid-template-columns: minmax(0, 1fr); align-items: start; }
       .ih-question-tools { justify-content: start; }
+      .ih-evaluation-head { grid-template-columns: minmax(0, 1fr); }
+      .ih-column-hints { justify-content: start; }
       .ih-grid[data-column-width] { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection { grid-template-columns: minmax(0, 1fr); }
       .ih-flow-selection-actions { justify-self: start; }
-      .ih-flow-canvas { min-height: 400px; height: 60vh; }
+      .ih-flow-canvas { min-height: 400px; height: max(60vh, min(var(--ih-flow-fit-height, 0px), 70vh)); }
     }
   `;
 
@@ -1540,12 +1661,16 @@
     const questionTools = bucketViewSwitch || columnWidthControl
       ? `<div class="ih-question-tools">${bucketViewSwitch}${columnWidthControl}</div>`
       : "";
+    const orderNote = questionDef.type === "bucket" && questionDef.ordered
+      ? `<p class="ih-question-note">${bucketView === "table" ? "Use the arrows to set the order within a category." : "Drag cards to set their order within a column."}</p>`
+      : "";
     return `
       <section class="ih-step" id="ih-question-${index}" data-question-id="${escapeAttr(questionDef.id)}" data-question-index="${index}">
         <div class="ih-question-head">
           <div>
             <p class="ih-kicker">Question ${index + 1} / ${instance.config.questions.length}</p>
             <h2 class="ih-prompt">${escapeHTML(questionDef.prompt)}</h2>
+            ${orderNote}
           </div>
           ${questionTools}
         </div>
@@ -1570,29 +1695,28 @@
   function renderChoice(questionDef, answer, instance) {
     const multiple = questionDef.select === "many";
     const selected = multiple ? asArray(answer.selected) : [answer.selected];
-    const layout = cardLayout(questionDef.options);
+    const layout = cardLayout(questionDef.options, questionDef.previewFrame);
     const gridClass = layout === "stack" ? "ih-stack" : "ih-grid";
     const layoutAttr = Number.isInteger(layout) ? ` data-cards-per-row="${layout}"` : "";
     const widthAttr = gridClass === "ih-grid" ? ` data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}"` : "";
-    const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id))).join("");
-    const addRow = multiple ? renderAddRow("Add another option") : "";
+    const options = answerOptions(questionDef, answer).map((entry) => renderChoiceOption(entry, answer, selected.includes(entry.id), questionDef.previewFrame)).join("");
+    const addRow = renderAddRow(multiple ? "Add another option" : "Add your own option");
     return `<div class="${gridClass}"${layoutAttr}${widthAttr}>${options}</div>${addRow}`;
   }
 
-  function renderChoiceOption(entry, answer, isSelected) {
-    const action = entry.custom ? "" : ` data-action="choose-option" tabindex="0"`;
+  function renderChoiceOption(entry, answer, isSelected, previewFrame) {
     return `
-      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}"${action}>
+      <article class="ih-card ih-choice ${isSelected ? "is-selected" : ""}" data-option-id="${escapeAttr(entry.id)}" data-action="choose-option" tabindex="0">
         <div class="ih-option-top">
-          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
+          ${entry.custom ? `<textarea class="ih-field ih-custom-title ih-auto-field" data-input="added-title" data-option-id="${escapeAttr(entry.id)}" rows="2" placeholder="Describe your option" aria-label="Custom option text">${escapeHTML(entry.title)}</textarea>` : `<h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>`}
           <div class="ih-option-actions">
             ${entry.custom ? "" : renderTooltipButton(entry.title, entry.markdownTooltip)}
             ${entry.custom ? "" : renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on option")}
             ${entry.custom ? `<button class="ih-remove-icon" type="button" data-action="remove-added" data-option-id="${escapeAttr(entry.id)}" aria-label="Remove custom option">${trashIcon()}</button>` : ""}
           </div>
         </div>
-        ${renderTags(entry.tags)}
-        ${renderCardContent(entry)}
+        ${renderTags(entry.custom ? ["Your option"] : entry.tags)}
+        ${renderCardContent(entry, previewFrame)}
       </article>
     `;
   }
@@ -1609,6 +1733,7 @@
   function renderEvaluation(questionDef, answer, instance) {
     const selectedIds = asArray(answer.selected ? [answer.selected] : []);
     const body = [];
+    if (hasPhonePreviews(questionDef)) body.push(renderEvaluationPreviewRow(questionDef, selectedIds));
     let previousGroup = null;
     questionDef.rows.forEach((row) => {
       if (row.group && row.group !== previousGroup) {
@@ -1618,32 +1743,35 @@
       body.push(renderEvaluationRow(questionDef, answer, row, selectedIds));
     });
     return `
-      <div class="ih-evaluation-board" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}">
+      <div class="ih-evaluation-board"${renderColumnFrameAttrs(questionDef, instance)}>
         <div class="ih-evaluation-head">
           <p class="ih-evaluation-note">Select one column. Comment on columns or criteria when the comparison needs clarification.</p>
+          ${renderColumnHints()}
         </div>
-        <div class="ih-evaluation-header-frame" data-evaluation-header-frame>
-          <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
-            <colgroup>
-              <col class="ih-evaluation-feature-col">
-              ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
-            </colgroup>
-            <thead>
-              <tr>
-                <th class="ih-evaluation-feature-head" aria-label="Rows"></th>
-                ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
-              </tr>
-            </thead>
-          </table>
-        </div>
-        <div class="ih-evaluation-frame" tabindex="0" aria-label="Evaluation table">
-          <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
-            <colgroup>
-              <col class="ih-evaluation-feature-col">
-              ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
-            </colgroup>
-            <tbody>${body.join("")}</tbody>
-          </table>
+        <div class="ih-column-edges">
+          <div class="ih-evaluation-header-frame" data-evaluation-header-frame>
+            <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
+              <colgroup>
+                <col class="ih-evaluation-feature-col">
+                ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="ih-evaluation-feature-head" aria-label="Rows"></th>
+                  ${questionDef.options.map((entry) => renderEvaluationColumn(questionDef, answer, entry, selectedIds.includes(entry.id))).join("")}
+                </tr>
+              </thead>
+            </table>
+          </div>
+          <div class="ih-evaluation-frame" data-column-frame tabindex="0" aria-label="Evaluation table">
+            <table class="ih-evaluation-table" style="--ih-evaluation-option-count: ${questionDef.options.length}">
+              <colgroup>
+                <col class="ih-evaluation-feature-col">
+                ${questionDef.options.map(() => `<col class="ih-evaluation-option-col">`).join("")}
+              </colgroup>
+              <tbody>${body.join("")}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
@@ -1654,6 +1782,14 @@
       return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column`)}></td>`;
     }).join("");
     return `<tr class="ih-evaluation-group-row"><th class="ih-evaluation-group-cell">${escapeHTML(row.group)}</th>${cells}</tr>`;
+  }
+
+  // Phone previews are too tall for the sticky column header, so they get the first body row.
+  function renderEvaluationPreviewRow(questionDef, selectedIds) {
+    const cells = questionDef.options.map((optionDef) => {
+      return `<td${renderEvaluationCellAttrs(optionDef, selectedIds, `Select ${optionDef.title} column`)}>${optionDef.previewType === "none" ? "" : renderPhonePreview(optionDef)}</td>`;
+    }).join("");
+    return `<tr class="ih-evaluation-preview-row"><th><div class="ih-evaluation-row-title"><span>Preview</span></div></th>${cells}</tr>`;
   }
 
   function renderEvaluationCellAttrs(optionDef, selectedIds, label) {
@@ -1673,7 +1809,7 @@
           <span class="ih-evaluation-column-title">${escapeHTML(entry.title)}</span>
           ${renderEvaluationColumnTags(entry.tags)}
           ${entry.markdown ? `<span class="ih-evaluation-column-markdown ih-markdown">${renderMarkdown(entry.markdown)}</span>` : ""}
-          ${entry.htmlPreview ? renderCardContent(Object.assign({}, entry, { markdown: "" })) : ""}
+          ${entry.htmlPreview && !questionDef.previewFrame ? renderCardContent(Object.assign({}, entry, { markdown: "" })) : ""}
         </div>
       </th>
     `;
@@ -1756,39 +1892,50 @@
     `;
   }
 
-  function renderBucketBoard(questionDef, answer, instance) {
-    const byBucket = {};
-    questionDef.buckets.forEach((bucket) => { byBucket[bucket.id] = []; });
-    const unset = [];
-    questionDef.options.forEach((entry) => {
-      const bucketId = answer.buckets && answer.buckets[entry.id] || "";
-      if (byBucket[bucketId]) byBucket[bucketId].push(entry);
-      else unset.push(entry);
-    });
+  function renderColumnFrameAttrs(questionDef, instance) {
+    const width = instance.columnWidth(questionDef.id);
+    const fit = width !== "narrow" && !instance.hasColumnWidthChoice(questionDef.id);
+    const phone = hasPhonePreviews(questionDef) ? ` data-preview-frame="phone"` : "";
+    return ` data-column-overflow data-column-width="${escapeAttr(width)}"${fit ? ` data-column-fit="${escapeAttr(width)}"` : ""}${phone}`;
+  }
 
+  function renderColumnHints() {
     return `
-      <div class="ih-bucket-frame" data-column-width="${escapeAttr(instance.columnWidth(questionDef.id))}" tabindex="0" aria-label="Buckets">
-        <div class="ih-bucket-board">
-          <section class="ih-bucket" data-bucket-id="">
-            <div class="ih-bucket-title">Unsorted</div>
-            <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="">
-              ${unset.length ? unset.map((entry) => renderBucketCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Everything is bucketed</div>`}
+      <div class="ih-column-hints">
+        <button class="ih-column-hint" type="button" data-action="scroll-columns" data-direction="-1" hidden></button>
+        <button class="ih-column-hint" type="button" data-action="scroll-columns" data-direction="1" hidden></button>
+      </div>
+    `;
+  }
+
+  function renderBucketBoard(questionDef, answer, instance) {
+    const groups = bucketGroups(questionDef, answer);
+    return `
+      <div class="ih-bucket-overflow"${renderColumnFrameAttrs(questionDef, instance)} style="--ih-bucket-count: ${questionDef.buckets.length + 1}">
+        ${renderColumnHints()}
+        <div class="ih-column-edges">
+          <div class="ih-bucket-frame" data-column-frame tabindex="0" aria-label="Buckets">
+            <div class="ih-bucket-board">
+              ${bucketsWithUnsorted(questionDef).map((bucket) => {
+                const entries = groups.get(bucket.id);
+                return `
+                  <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
+                    <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
+                    <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
+                      ${entries.length ? entries.map((entry, index) => renderBucketCard(questionDef, answer, entry, bucketPosition(bucket.id, index))).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "board")}</div>`}
+                    </div>
+                  </section>
+                `;
+              }).join("")}
             </div>
-          </section>
-          ${questionDef.buckets.map((bucket) => `
-            <section class="ih-bucket" data-bucket-id="${escapeAttr(bucket.id)}">
-              <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
-              <div class="ih-bucket-list" data-sortable-bucket data-bucket-id="${escapeAttr(bucket.id)}">
-                ${byBucket[bucket.id].length ? byBucket[bucket.id].map((entry) => renderBucketCard(questionDef, answer, entry)).join("") : `<div class="ih-bucket-empty">Drop options here</div>`}
-              </div>
-            </section>
-          `).join("")}
+          </div>
         </div>
       </div>
     `;
   }
 
   function renderBucketTable(questionDef, answer) {
+    if (questionDef.ordered) return renderOrderedBucketTable(questionDef, answer);
     return `
       <div class="ih-bucket-table" role="list" aria-label="Table view">
         ${questionDef.options.map((entry) => renderBucketTableCard(questionDef, answer, entry)).join("")}
@@ -1796,30 +1943,50 @@
     `;
   }
 
-  function renderBucketTableCard(questionDef, answer, entry) {
+  function renderOrderedBucketTable(questionDef, answer) {
+    const groups = bucketGroups(questionDef, answer);
+    return `
+      <div class="ih-bucket-table is-ordered" role="group" aria-label="Table view">
+        ${bucketsWithUnsorted(questionDef).map((bucket) => {
+          const entries = groups.get(bucket.id);
+          return `
+            <section class="ih-bucket-table-group">
+              <div class="ih-bucket-title">${escapeHTML(bucket.title)}</div>
+              <div class="ih-bucket-table-list" role="list" aria-label="${escapeAttr(bucket.title)}" data-bucket-id="${escapeAttr(bucket.id)}">
+                ${entries.length ? entries.map((entry, index) => renderBucketTableCard(questionDef, answer, entry, bucketPosition(bucket.id, index), entries.length)).join("") : `<div class="ih-bucket-empty">${bucketEmptyText(bucket.id, "table")}</div>`}
+              </div>
+            </section>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderBucketTableCard(questionDef, answer, entry, position, count) {
     const currentBucketId = answer.buckets && answer.buckets[entry.id] || "";
     return `
       <article class="ih-card ih-bucket-table-card" role="listitem" data-option-id="${escapeAttr(entry.id)}">
         <div class="ih-bucket-table-heading">
-          <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
+          <h3 class="ih-option-title">${renderBucketPosition(questionDef, position)}${escapeHTML(entry.title)}</h3>
           ${renderTags(entry.tags)}
         </div>
         <div class="ih-bucket-table-controls">
           ${renderBucketStateOptions(questionDef, entry, currentBucketId)}
           <div class="ih-bucket-table-actions">
+            ${questionDef.ordered ? renderBucketReorder(entry, position, count) : ""}
             ${renderTooltipButton(entry.title, entry.markdownTooltip)}
             ${renderCommentButton("option-comment", entry.id, optionComment(answer, entry.id), "Comment on bucket option")}
           </div>
         </div>
         <div class="ih-bucket-table-content">
-          ${renderCardContent(entry)}
+          ${renderCardContent(entry, questionDef.previewFrame)}
         </div>
       </article>
     `;
   }
 
   function renderBucketStateOptions(questionDef, entry, currentBucketId) {
-    const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+    const buckets = bucketsWithUnsorted(questionDef);
     return `
       <div class="ih-bucket-state-options" role="group" aria-label="Set status for ${escapeAttr(entry.title)}">
         ${buckets.map((bucket) => {
@@ -1830,12 +1997,44 @@
     `;
   }
 
-  function renderBucketCard(questionDef, answer, entry) {
+  function renderBucketPosition(questionDef, position) {
+    if (!questionDef.ordered) return "";
+    return `<span class="ih-bucket-position" data-bucket-position ${position ? "" : "hidden"}>${position || ""}</span> `;
+  }
+
+  function renderBucketReorder(entry, position, count) {
+    return `
+      <span class="ih-bucket-reorder" data-bucket-reorder ${position ? "" : "hidden"}>
+        <button class="ih-icon-btn ih-bucket-reorder-button" type="button" data-action="reorder-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-direction="up" aria-label="Move ${escapeAttr(entry.title)} up" title="Move up" aria-disabled="${isReorderBlocked("up", position, count)}">${arrowIcon("up")}</button>
+        <button class="ih-icon-btn ih-bucket-reorder-button" type="button" data-action="reorder-bucket-option" data-option-id="${escapeAttr(entry.id)}" data-direction="down" aria-label="Move ${escapeAttr(entry.title)} down" title="Move down" aria-disabled="${isReorderBlocked("down", position, count)}">${arrowIcon("down")}</button>
+      </span>
+    `;
+  }
+
+  function syncBucketCardPosition(card, position, count) {
+    const label = card.querySelector("[data-bucket-position]");
+    if (label) {
+      label.hidden = !position;
+      label.textContent = position ? String(position) : "";
+    }
+    const reorder = card.querySelector("[data-bucket-reorder]");
+    if (reorder) reorder.hidden = !position;
+    card.querySelectorAll("[data-action='reorder-bucket-option']").forEach((button) => {
+      button.setAttribute("aria-disabled", String(isReorderBlocked(button.dataset.direction, position, count)));
+    });
+  }
+
+  // Edge buttons use aria-disabled so they keep focus: pressing Move up again at the top does nothing.
+  function isReorderBlocked(direction, position, count) {
+    return direction === "up" ? position <= 1 : !position || position >= count;
+  }
+
+  function renderBucketCard(questionDef, answer, entry, position) {
     const currentBucketId = answer.buckets && answer.buckets[entry.id] || "";
     return `
       <article class="ih-bucket-card" data-option-id="${escapeAttr(entry.id)}">
         <button class="ih-grip" type="button" aria-label="Drag to bucket"></button>
-        <h3 class="ih-option-title">${escapeHTML(entry.title)}</h3>
+        <h3 class="ih-option-title">${renderBucketPosition(questionDef, position)}${escapeHTML(entry.title)}</h3>
         <div class="ih-bucket-actions">
           ${renderMoveMenu(questionDef, entry, currentBucketId)}
           ${renderTooltipButton(entry.title, entry.markdownTooltip)}
@@ -1843,14 +2042,14 @@
         </div>
         <div class="ih-bucket-card-content">
           ${renderTags(entry.tags)}
-          ${renderCardContent(entry)}
+          ${renderCardContent(entry, questionDef.previewFrame)}
         </div>
       </article>
     `;
   }
 
   function renderMoveMenu(questionDef, entry, currentBucketId) {
-    const buckets = [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+    const buckets = bucketsWithUnsorted(questionDef);
     return `
       <details class="ih-move-menu">
         <summary class="ih-move-button" data-action="toggle-move-menu" aria-label="Move bucket option" title="Move to bucket">${moveIcon()}</summary>
@@ -1870,11 +2069,15 @@
         <div class="ih-card" data-edit>
           <div class="ih-option-top">
             <label class="ih-label">Editable artifact</label>
-            ${renderCommentButton("edit-summary", "", answer.summary || "", "Comment on edited artifact")}
+            <div class="ih-edit-actions" data-edit-actions>
+              ${answer.confirmed || isEditChanged(questionDef, answer) ? "" : `<button class="ih-btn" type="button" data-action="edit-accept">Accept as proposed</button>`}
+              ${renderCommentButton("edit-summary", "", answer.summary || "", "Comment on edited artifact")}
+            </div>
           </div>
           <div class="ih-code-editor-host" data-code-editor data-lang="${escapeAttr(questionDef.artifact && questionDef.artifact.lang || questionDef.language || "")}"></div>
           <textarea class="ih-code-fallback ih-auto-field" data-input="edit-content" spellcheck="false" wrap="off">${escapeHTML(answer.content || "")}</textarea>
           <div class="ih-editor-loading" data-editor-loading>Loading syntax editor...</div>
+          <p class="ih-edit-status" data-edit-status>${escapeHTML(editStatusText(questionDef, answer))}</p>
         </div>
       </div>
     `;
@@ -1903,7 +2106,7 @@
           </div>
           <p class="ih-flow-tip">Drag nodes to move them. Hold <kbd class="ih-shortcut-key"><span class="ih-flow-key-glyph">⌘</span></kbd> while dragging between nodes to connect them.</p>
         </div>
-        <div class="ih-flow-canvas" data-flow-editor data-question-id="${escapeAttr(questionDef.id)}">
+        <div class="ih-flow-canvas" data-flow-editor data-question-id="${escapeAttr(questionDef.id)}" style="--ih-flow-fit-height: ${flowFitHeight(answer)}px">
           <span class="ih-flow-loading">Loading flow editor...</span>
         </div>
         <div class="ih-flow-selection" data-flow-selection>
@@ -1972,8 +2175,13 @@
           <div>
             <p class="ih-kicker">Output</p>
             <h2 class="ih-prompt">Export the answer summary.</h2>
-            <p class="ih-export-note">Copy the answer summary for the next agent.</p>
+            <p class="ih-export-note">Add anything the questions missed, then copy the answer summary for the next agent.</p>
           </div>
+        </div>
+        <div class="ih-card ih-closing-note">
+          <h3 class="ih-option-title"><label for="ih-closing-note">Anything the questions didn't cover?</label></h3>
+          <p class="ih-closing-note-help" id="ih-closing-note-help">Constraints, must-haves, or anything you expected to be asked.</p>
+          <textarea class="ih-field ih-auto-field" id="ih-closing-note" data-input="closing-note" rows="3" aria-describedby="ih-closing-note-help">${escapeHTML(instance.state.closingNote || "")}</textarea>
         </div>
         <div class="ih-card">
           <div class="ih-option-top" style="margin-bottom:12px">
@@ -1986,10 +2194,69 @@
     `;
   }
 
-  function cardLayout(cards) {
+  function renderMountError(theme, problems, report) {
+    return `
+      <div class="ih-app" data-ih-theme="${escapeAttr(theme)}">
+        <main class="ih-main">
+          <section class="ih-step ih-mount-error" role="alert">
+            <div class="ih-question-head">
+              <div>
+                <p class="ih-kicker">Interview Harness ${escapeHTML(VERSION)}</p>
+                <h1 class="ih-prompt">This interview can't open</h1>
+                <p class="ih-export-note">Copy the report and send it to the agent that generated this interview.</p>
+              </div>
+            </div>
+            <div class="ih-card">
+              <h2 class="ih-option-title">${problems.length === 1 ? "1 problem" : `${problems.length} problems`}</h2>
+              <ul class="ih-mount-error-list">${problems.map((problem) => `<li>${escapeHTML(problem)}</li>`).join("")}</ul>
+            </div>
+            <div class="ih-card">
+              <div class="ih-option-top">
+                <h2 class="ih-option-title">Report</h2>
+                <button class="ih-btn ih-btn-primary" type="button" data-action="copy-error-report">Copy report</button>
+              </div>
+              <pre class="ih-output ih-mount-error-report" data-error-report>${escapeHTML(report)}</pre>
+            </div>
+          </section>
+        </main>
+        <div class="ih-toast" role="status" aria-live="polite"></div>
+      </div>
+    `;
+  }
+
+  function cardLayout(cards, previewFrame) {
+    if (previewFrame && cards.some((card) => card.previewType !== "none")) return 3;
     if (cards.some((card) => card.previewType === "file")) return 1;
     if (cards.some((card) => card.previewType === "inline")) return 2;
     return cards.some((card) => card.markdown) ? "auto" : "stack";
+  }
+
+  function hasPhonePreviews(questionDef) {
+    return Boolean(questionDef.previewFrame) && questionDef.options.some((card) => card.previewType !== "none");
+  }
+
+  function columnFrameView(frame) {
+    const rect = frame.getBoundingClientRect();
+    const left = rect.left + frame.clientLeft;
+    const row = frame.querySelector(".ih-evaluation-table > tbody > tr");
+    const rowHead = row && row.querySelector(":scope > th");
+    return {
+      left: rowHead ? rowHead.getBoundingClientRect().right : left,
+      right: left + frame.clientWidth,
+      columns: Array.from(row ? row.querySelectorAll(":scope > td") : frame.querySelectorAll(".ih-bucket-board > .ih-bucket"))
+    };
+  }
+
+  // Scrolls a compare column clear of the sticky criteria column and the right edge.
+  function revealColumn(frame, optionId) {
+    const view = columnFrameView(frame);
+    const column = view.columns.find((cell) => cell.dataset.optionId === optionId);
+    if (!column) return;
+    const rect = column.getBoundingClientRect();
+    const delta = rect.left < view.left - 1
+      ? rect.left - view.left
+      : rect.right > view.right + 1 ? Math.min(rect.right - view.right, rect.left - view.left) : 0;
+    if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
   }
 
   function isColumnWidthQuestion(questionDef) {
@@ -2000,28 +2267,76 @@
     if (!isColumnWidthQuestion(questionDef)) return false;
     if (questionDef.type === "bucket") return bucketView !== "table";
     if (questionDef.type === "evaluation") return questionDef.options.length > 1;
-    const layout = cardLayout(questionDef.options);
+    const layout = cardLayout(questionDef.options, questionDef.previewFrame);
     return questionDef.options.length > 1 && layout !== "stack" && layout !== 1;
   }
 
-  function renderCardContent(card) {
+  function renderCardContent(card, previewFrame) {
     const parts = [];
     if (card.markdown) parts.push(`<div class="ih-rich ih-markdown">${renderMarkdown(card.markdown)}</div>`);
-    if (card.previewType === "inline") parts.push(`<div class="ih-html-preview">${card.htmlPreview}</div>`);
-    if (card.previewType === "file") parts.push(renderFilePreview(card));
+    if (card.previewType !== "none" && previewFrame) parts.push(renderPhonePreview(card));
+    else if (card.previewType === "inline") parts.push(`<div class="ih-html-preview">${card.htmlPreview}</div>`);
+    else if (card.previewType === "file") parts.push(renderFilePreview(card));
     return parts.join("");
   }
 
+  function filePreviewSource(card) {
+    return card.htmlPreview.slice("file:".length).trim();
+  }
+
   function renderFilePreview(card) {
-    const src = card.htmlPreview.slice("file:".length).trim();
-    const sourceName = frameSourceName(src) || card.title;
+    const src = filePreviewSource(card);
     return `<div class="ih-frame-shell">
-      <div class="ih-frame-bar">
-        <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
-        <a class="ih-frame-open" href="${escapeAttr(src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>
-      </div>
+      ${renderFrameBar(card, src)}
       <iframe class="ih-frame" title="${escapeAttr(card.title)}" src="${escapeAttr(src)}"></iframe>
     </div>`;
+  }
+
+  function renderFrameBar(card, src) {
+    const sourceName = frameSourceName(src) || card.title;
+    return `<div class="ih-frame-bar">
+      <span class="ih-frame-name" title="${escapeAttr(sourceName)}">${escapeHTML(sourceName)}</span>
+      <a class="ih-frame-open" href="${escapeAttr(src)}" target="_blank" rel="noopener" aria-label="Open ${escapeAttr(sourceName)} in a new tab" title="Open ${escapeAttr(sourceName)} in a new tab">${externalLinkIcon()}</a>
+    </div>`;
+  }
+
+  // Shows a preview in a 390x780 phone viewport. Inline HTML becomes a srcdoc document; it is author content like
+  // the rest of the page, so it is not sandboxed. It gets no open link: a new tab would lose the phone viewport.
+  function renderPhonePreview(card) {
+    const src = card.previewType === "file" ? filePreviewSource(card) : "";
+    const srcdoc = /^\s*<!doctype/i.test(card.htmlPreview) ? card.htmlPreview : `<!doctype html>${card.htmlPreview}`;
+    const source = src ? `src="${escapeAttr(src)}"` : `srcdoc="${escapeAttr(srcdoc)}"`;
+    const phone = `<div class="ih-phone-fit"><div class="ih-phone"><iframe title="${escapeAttr(card.title)}" ${source}></iframe></div></div>`;
+    return src ? `<div class="ih-frame-shell is-phone">${renderFrameBar(card, src)}${phone}</div>` : phone;
+  }
+
+  // The fit box takes the scaled phone's size from CSS, so scaling never resizes what the ResizeObserver watches.
+  function fitPhone(fit) {
+    const scale = Math.min(1, fit.clientWidth / fit.firstElementChild.offsetWidth) || 1;
+    fit.style.setProperty("--ih-phone-scale", String(scale));
+  }
+
+  // A srcdoc preview resolves "#id" links, empty links, and action-less forms against the interview's URL, so following
+  // one would load the interview or a blank page inside the phone. Keep that navigation inside the preview.
+  function keepSrcdocNavigationInFrame(frame) {
+    const doc = frame.contentDocument;
+    if (!doc || doc.URL !== "about:srcdoc") return;
+    const staysOnPage = (url) => /^about:/i.test(url) || url.split("#")[0] === doc.baseURI.split("#")[0];
+    doc.addEventListener("click", (event) => {
+      const link = event.target.closest && event.target.closest("a[href]");
+      if (!link || typeof link.href !== "string" || event.defaultPrevented || !staysOnPage(link.href)) return;
+      event.preventDefault();
+      let id = new URL(link.href).hash.slice(1);
+      try { id = decodeURIComponent(id); } catch (_) {}
+      const target = id && doc.getElementById(id);
+      if (target) target.scrollIntoView();
+      else if (!id || /^top$/i.test(id)) frame.contentWindow.scrollTo(0, 0);
+    });
+    doc.addEventListener("submit", (event) => {
+      const form = event.target;
+      if (event.defaultPrevented || /^dialog$/i.test(form.getAttribute("method") || "")) return;
+      if (staysOnPage(new URL(form.getAttribute("action") || "about:srcdoc", doc.baseURI).href)) event.preventDefault();
+    });
   }
 
   function renderTooltipButton(title, markdown) {
@@ -2115,6 +2430,11 @@
 
   function moveIcon() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M6.707 3.293a1 1 0 0 1 .083 1.32l-.083.094L5.415 6H10a1 1 0 0 1 .117 1.993L10 8H5.415l1.292 1.293a1 1 0 0 1 .083 1.32l-.083.094a1 1 0 0 1-1.32.083l-.094-.083l-3-3a1.008 1.008 0 0 1-.097-.112l-.071-.11l-.054-.114l-.035-.105l-.025-.118l-.007-.058L2 7l.003-.075l.017-.126l.03-.111l.044-.111l.052-.098l.064-.092l.083-.094l3-3a1 1 0 0 1 1.414 0"/><path d="m18.613 3.21l.094.083l3 3a.927.927 0 0 1 .097.112l.071.11l.054.114l.035.105l.03.148L22 7l-.003.075l-.017.126l-.03.111l-.044.111l-.052.098l-.074.104l-.073.082l-3 3a1 1 0 0 1-1.497-1.32l.083-.094L18.585 8H14a1 1 0 0 1-.117-1.993L14 6h4.585l-1.292-1.293a1 1 0 0 1-.083-1.32l.083-.094a1 1 0 0 1 1.32-.083"/><path d="M18 13H6a3 3 0 0 0-3 3v2a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-2a3 3 0 0 0-3-3"/></svg>`;
+  }
+
+  function arrowIcon(direction) {
+    const path = direction === "up" ? "M12 19V5M6 11l6-6 6 6" : "M12 5v14M6 13l6 6 6-6";
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
   }
 
   function externalLinkIcon() {
@@ -2239,14 +2559,15 @@
       this.theme = readSharedTheme();
       this.saveTimer = null;
       this.chromeFrame = null;
+      this.renderFrame = null;
       this.sortables = [];
       this.flowEditors = [];
       this.flowHistories = new Map();
       this.flowViewCleanups = [];
       this.sequenceCleanups = [];
       this.codeEditors = [];
-      this.frameObjectUrls = [];
-      this.evaluationScrollCleanups = [];
+      this.columnFrameCleanups = [];
+      this.phoneFrameObserver = null;
       this.exportTimer = null;
       this.toastTimer = null;
       this.onDocumentKeydown = (event) => this.onKeydown(event);
@@ -2269,6 +2590,9 @@
       this.root.addEventListener("input", (event) => this.onInput(event));
       this.root.addEventListener("change", (event) => this.onInput(event));
       this.root.addEventListener("focusout", (event) => this.onFocusout(event));
+      this.root.addEventListener("load", (event) => {
+        if (event.target.matches && event.target.matches(".ih-phone > iframe[srcdoc]")) keepSrcdocNavigationInFrame(event.target);
+      }, true);
       global.document.addEventListener("keydown", this.onDocumentKeydown);
       global.addEventListener("storage", this.onThemeStorage);
       this.root.addEventListener("mouseover", (event) => this.onMouseover(event));
@@ -2293,10 +2617,13 @@
     }
 
     afterRender() {
-      requestAnimationFrame(() => {
+      // Two renders can land before the next frame (marked.js loading quickly); enhance only the latest DOM, once.
+      cancelAnimationFrame(this.renderFrame);
+      this.renderFrame = requestAnimationFrame(() => {
+        this.renderFrame = null;
         this.root.querySelectorAll("textarea").forEach(autoGrowTextarea);
-        this.initFrameLinks();
-        this.initEvaluationHeaderScroll();
+        this.initPhoneFrames();
+        this.initColumnFrames();
         this.initSortables();
         this.initFlowEditors();
         this.initSequenceEditors();
@@ -2322,6 +2649,10 @@
       return columnWidthValue(safeObject(this.state.columnWidths)[questionId])
         || context && context.questionDef.columnWidth
         || "narrow";
+    }
+
+    hasColumnWidthChoice(questionId) {
+      return Boolean(columnWidthValue(safeObject(this.state.columnWidths)[questionId]));
     }
 
     setTheme(theme, persist = true) {
@@ -2384,6 +2715,7 @@
         event.preventDefault();
         return this.toggleMoveMenu(actionEl);
       }
+      if (action === "scroll-columns") return this.scrollColumns(actionEl);
 
       const context = this.contextFromNode(actionEl);
       this.activateContext(context);
@@ -2392,6 +2724,7 @@
       if (action === "choose-option") return this.chooseOption(actionEl.dataset.optionId, context);
       if (action === "choose-evaluation-option") return this.chooseEvaluationOption(actionEl.dataset.optionId, context);
       if (action === "move-bucket-option") return this.moveBucketOption(actionEl, context);
+      if (action === "reorder-bucket-option") return this.reorderBucketOption(actionEl, context);
       if (action === "add-option") return this.addOption(context);
       if (action === "remove-added") return this.removeAdded(actionEl.dataset.optionId || numberOr(actionEl.dataset.addedIndex, -1), context);
       if (action === "flow-show-add") return this.showFlowAdd(context);
@@ -2403,6 +2736,7 @@
       if (action === "flow-redo") return this.redoFlow(context);
       if (action === "flow-arrange") return this.arrangeFlow(context);
       if (action === "sequence-confirm") return this.confirmSequence(context);
+      if (action === "edit-accept") return this.acceptEdit(context);
     }
 
     onMouseover(event) {
@@ -2436,6 +2770,13 @@
         return;
       }
       if (kind === "flow-new-node") return;
+      if (kind === "closing-note") {
+        this.state.closingNote = input.value;
+        this.state.step = this.config.questions.length;
+        autoGrowTextarea(input);
+        this.markChanged(null, true);
+        return;
+      }
       const context = kind === "comment-modal" && this.state.commentEditor
         ? this.contextByQuestionId(this.state.commentEditor.questionId)
         : this.contextFromNode(input);
@@ -2465,7 +2806,10 @@
         this.syncOpenCommentButton();
       }
       if (kind === "added-title") this.updateAddedTitle(input.dataset.optionId, input.value, context);
-      if (kind === "edit-content") answer.content = input.value;
+      if (kind === "edit-content") {
+        answer.content = input.value;
+        this.refreshEditResponse(context);
+      }
       if (kind === "sequence-source") {
         answer.source = input.value;
         const validation = validateSequenceSource(answer.source);
@@ -2783,41 +3127,134 @@
         try { view.destroy(); } catch (_) {}
       });
       this.codeEditors = [];
-      this.evaluationScrollCleanups.forEach((cleanup) => {
+      this.columnFrameCleanups.forEach((cleanup) => {
         try { cleanup(); } catch (_) {}
       });
-      this.evaluationScrollCleanups = [];
-      this.frameObjectUrls.forEach((url) => {
-        try { global.URL.revokeObjectURL(url); } catch (_) {}
-      });
-      this.frameObjectUrls = [];
+      this.columnFrameCleanups = [];
+      if (this.phoneFrameObserver) this.phoneFrameObserver.disconnect();
     }
 
-    initEvaluationHeaderScroll() {
-      this.root.querySelectorAll(".ih-evaluation-board").forEach((board) => {
-        const frame = board.querySelector(".ih-evaluation-frame");
+    initColumnFrames() {
+      this.root.querySelectorAll("[data-column-overflow]").forEach((board) => {
+        const frame = board.querySelector("[data-column-frame]");
+        if (!frame) return;
         const header = board.querySelector("[data-evaluation-header-frame]");
-        if (!frame || !header) return;
-        const sync = () => { header.scrollLeft = frame.scrollLeft; };
-        frame.addEventListener("scroll", sync, { passive: true });
-        this.evaluationScrollCleanups.push(() => frame.removeEventListener("scroll", sync));
-        sync();
+        let headerLeft = 0;
+        const update = () => {
+          if (header) {
+            header.scrollLeft = frame.scrollLeft;
+            headerLeft = header.scrollLeft;
+          }
+          this.updateColumnOverflow(board);
+        };
+        // Focusing a clipped column heading scrolls the header on its own; bring the body along.
+        const followHeader = () => {
+          if (Math.abs(header.scrollLeft - headerLeft) > 1) frame.scrollLeft = header.scrollLeft;
+        };
+        // Focus scrolling ignores the sticky criteria column, so reveal a focused column fully.
+        const revealFocused = (event) => {
+          const cell = event.target.closest("td[data-option-id], th[data-option-id]");
+          if (cell) requestAnimationFrame(() => revealColumn(frame, cell.dataset.optionId));
+        };
+        const refit = () => {
+          this.fitColumns(board);
+          update();
+        };
+        frame.addEventListener("scroll", update, { passive: true });
+        if (header) {
+          header.addEventListener("scroll", followHeader, { passive: true });
+          board.addEventListener("focusin", revealFocused);
+        }
+        global.addEventListener("resize", refit);
+        this.columnFrameCleanups.push(() => {
+          frame.removeEventListener("scroll", update);
+          if (header) {
+            header.removeEventListener("scroll", followHeader);
+            board.removeEventListener("focusin", revealFocused);
+          }
+          global.removeEventListener("resize", refit);
+        });
+        refit();
       });
     }
 
-    initFrameLinks() {
-      this.root.querySelectorAll("[data-frame-srcdoc]").forEach((link) => {
-        const srcdoc = link.dataset.frameSrcdoc || "";
-        if (!srcdoc) return;
-        let url = "";
-        try {
-          if (global.Blob && global.URL && global.URL.createObjectURL) {
-            url = global.URL.createObjectURL(new global.Blob([srcdoc], { type: "text/html;charset=utf-8" }));
-            this.frameObjectUrls.push(url);
-          }
-        } catch (_) {}
-        link.href = url || `data:text/html;charset=utf-8,${encodeURIComponent(srcdoc)}`;
+    initPhoneFrames() {
+      const fits = this.root.querySelectorAll(".ih-phone-fit");
+      fits.forEach(fitPhone);
+      if (!fits.length || !global.ResizeObserver) return;
+      // One observer per instance: destroyEnhancements disconnects it, so repeated renders cannot stack observers.
+      if (!this.phoneFrameObserver) this.phoneFrameObserver = new global.ResizeObserver((entries) => entries.forEach((entry) => fitPhone(entry.target)));
+      fits.forEach((fit) => this.phoneFrameObserver.observe(fit));
+    }
+
+    fitColumns(board) {
+      const preset = board.dataset.columnFit;
+      const frame = board.querySelector("[data-column-frame]");
+      if (!preset || !frame) return;
+      const overflows = () => frame.scrollWidth > frame.clientWidth + 1;
+      board.dataset.columnWidth = preset;
+      if (overflows()) {
+        board.dataset.columnWidth = "narrow";
+        if (overflows()) board.dataset.columnWidth = preset;
+      }
+      const section = board.closest(".ih-step");
+      if (!section) return;
+      section.querySelectorAll("[data-action='set-column-width']").forEach((button) => {
+        const selected = button.dataset.columnWidth === board.dataset.columnWidth;
+        button.classList.toggle("is-selected", selected);
+        button.setAttribute("aria-pressed", selected ? "true" : "false");
       });
+    }
+
+    updateColumnOverflow(board) {
+      const frame = board.querySelector("[data-column-frame]");
+      const edges = board.querySelector(".ih-column-edges");
+      if (!frame || !edges) return;
+      const view = columnFrameView(frame);
+      const before = view.columns.filter((column) => column.getBoundingClientRect().left < view.left - 2).length;
+      const after = view.columns.filter((column) => column.getBoundingClientRect().right > view.right + 2).length;
+      edges.style.setProperty("--ih-column-edge-start", `${Math.round(view.left - frame.getBoundingClientRect().left)}px`);
+      edges.classList.toggle("is-overflow-start", before > 0);
+      edges.classList.toggle("is-overflow-end", after > 0);
+      const hints = Array.from(board.querySelectorAll("[data-action='scroll-columns']"));
+      let hidFocusedHint = false;
+      hints.forEach((hint) => {
+        const toStart = hint.dataset.direction === "-1";
+        const count = toStart ? before : after;
+        const label = `${count} more ${count === 1 ? "column" : "columns"}`;
+        if (count === 0 && hint === global.document.activeElement) hidFocusedHint = true;
+        hint.hidden = count === 0;
+        hint.textContent = toStart ? `← ${label}` : `${label} →`;
+        hint.setAttribute("aria-label", `${label} to the ${toStart ? "left" : "right"}`);
+      });
+      // Keep keyboard focus nearby when paging reaches the last column.
+      if (hidFocusedHint) (hints.find((hint) => !hint.hidden) || frame).focus({ preventScroll: true });
+    }
+
+    scrollColumns(hint) {
+      const board = hint.closest("[data-column-overflow]");
+      const frame = board && board.querySelector("[data-column-frame]");
+      if (!frame) return;
+      const view = columnFrameView(frame);
+      const viewWidth = view.right - view.left;
+      const rects = view.columns.map((column) => column.getBoundingClientRect());
+      let delta = 0;
+      // Page so the next hidden column starts the view, or the previous one ends it;
+      // a column wider than the view is paged through one view at a time.
+      if (hint.dataset.direction === "-1") {
+        const previous = rects.filter((rect) => rect.left < view.left - 2).pop();
+        if (previous) delta = previous.right < view.right - 2 ? previous.right - view.right : Math.max(previous.left - view.left, -viewWidth);
+      } else {
+        const next = rects.find((rect) => rect.right > view.right + 2);
+        if (next) delta = next.left > view.left + 2 ? next.left - view.left : Math.min(next.right - view.right, viewWidth);
+      }
+      if (delta) frame.scrollBy({ left: delta, behavior: "smooth" });
+    }
+
+    revealEvaluationOption(context, optionId) {
+      const section = this.sectionForContext(context);
+      const frame = section && section.querySelector(".ih-evaluation-frame");
+      if (frame) revealColumn(frame, optionId);
     }
 
     initSortables() {
@@ -2878,9 +3315,14 @@
         });
       }
       const flowTheme = flowVisualTheme(host);
-      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name], flowTheme)));
       const flowConnections = normalizeFlowConnections(answer.connections, false);
+      const levels = shouldAutoArrange ? flowLevels(flowNodes, flowConnections) : {};
+      const spacing = flowLayoutSpacing(flowConnections);
+      const nodes = new vis.DataSet(flowNodes.map((node) => flowVisNodeRecord(node, answer.positions[node.name], flowTheme, levels[node.name])));
       const edges = new vis.DataSet(flowConnections.map((connection) => flowVisConnectionRecord(connection, flowConnections, flowTheme)));
+      // Labels and routes keep to the view the first fit shows; moving a node later does not refit the view.
+      let fittedView = null;
+      const layoutView = () => fittedView || flowFitBox(network, host);
       const network = new vis.Network(host, { nodes, edges }, {
         autoResize: true,
         nodes: {
@@ -2892,7 +3334,6 @@
           chosen: { node: true, label: false }
         },
         edges: {
-          font: { color: flowTheme.muted, size: 11, face: "Inter, system-ui, sans-serif", background: flowTheme.labelBackground, strokeWidth: 0, align: "horizontal" },
           selectionWidth: 2.4,
           hoverWidth: 1.5,
           chosen: { edge: true, label: false }
@@ -2902,9 +3343,9 @@
             enabled: shouldAutoArrange,
             direction: "UD",
             sortMethod: "directed",
-            levelSeparation: 120,
-            nodeSpacing: 210,
-            treeSpacing: 240,
+            levelSeparation: spacing.levelSeparation,
+            nodeSpacing: spacing.nodeSpacing,
+            treeSpacing: spacing.treeSpacing,
             blockShifting: true,
             edgeMinimization: true,
             parentCentralization: true
@@ -2950,6 +3391,7 @@
             this.markChanged(answer);
             setTimeout(() => {
               if (!host.isConnected) return;
+              routeFlowEdges(network, edges, answer.connections, layoutView());
               network.selectEdges([key]);
               this.refreshFlowSelection(context);
             }, 0);
@@ -2997,6 +3439,7 @@
         }
       };
       this.flowEditors.push(editor);
+      network.on("afterDrawing", (ctx) => drawFlowLabels(ctx, network, edges, answer.connections, flowTheme, layoutView()));
       network.on("click", (params) => {
         answer.adding = false;
         if (params.nodes.length) answer.selected = { kind: "node", name: String(params.nodes[0]) };
@@ -3009,9 +3452,12 @@
       network.on("dragEnd", (params) => {
         if (connecting || !params.nodes.length) return;
         answer.positions = Object.assign({}, safeObject(answer.positions), network.getPositions(params.nodes.map(String)));
+        routeFlowEdges(network, edges, answer.connections, layoutView());
         this.save();
       });
       const finishInitialDrawing = () => {
+        fittedView = flowFitBox(network, host);
+        routeFlowEdges(network, edges, answer.connections, fittedView);
         network.fit({ animation: { duration: 320, easingFunction: "easeInOutQuad" } });
         const selected = normalizeFlowSelection(answer.selected, answer);
         if (selected && selected.kind === "node") network.selectNodes([selected.name], false);
@@ -3316,7 +3762,7 @@
         answer.confirmed = true;
         answer.updated = true;
         const editor = this.flowEditorFor(context.questionDef.id);
-        if (editor) editor.edges.update({ id: selected.key, label: value });
+        if (editor) editor.network.redraw();
         this.markChanged(answer, true);
         this.refreshFlowToolbar(context);
         return;
@@ -3505,6 +3951,33 @@
       }
     }
 
+    acceptEdit(context) {
+      if (!context || context.questionDef.type !== "edit") return;
+      context.answer.confirmed = true;
+      this.refreshEditResponse(context);
+      this.markChanged(context.answer);
+    }
+
+    refreshEditResponse(context) {
+      if (!context || context.questionDef.type !== "edit") return;
+      const section = this.sectionForContext(context);
+      if (!section) return;
+      const status = section.querySelector("[data-edit-status]");
+      if (status) status.textContent = editStatusText(context.questionDef, context.answer);
+      const actions = section.querySelector("[data-edit-actions]");
+      const accept = actions && actions.querySelector("[data-action='edit-accept']");
+      if (context.answer.confirmed || isEditChanged(context.questionDef, context.answer)) {
+        accept?.remove();
+      } else if (actions && !accept) {
+        const button = document.createElement("button");
+        button.className = "ih-btn";
+        button.type = "button";
+        button.dataset.action = "edit-accept";
+        button.textContent = "Accept as proposed";
+        actions.prepend(button);
+      }
+    }
+
     initCodeEditors() {
       this.root.querySelectorAll("[data-code-editor]").forEach((host) => this.initCodeEditor(host));
     }
@@ -3522,6 +3995,7 @@
         lang: host.dataset.lang || "",
         onChange: (value) => {
           context.answer.content = value;
+          this.refreshEditResponse(context);
           this.markChanged(context.answer, true);
         }
       }).then((view) => {
@@ -3542,13 +4016,16 @@
     updateBucketFromDom(context) {
       const section = this.sectionForContext(context);
       if (!context || context.questionDef.type !== "bucket" || !section) return;
+      const order = [];
       context.questionDef.options.forEach((entry) => { context.answer.buckets[entry.id] = ""; });
       section.querySelectorAll(".ih-bucket-list[data-bucket-id]").forEach((list) => {
         const bucketId = list.dataset.bucketId || "";
         list.querySelectorAll(".ih-bucket-card[data-option-id]").forEach((card) => {
           context.answer.buckets[card.dataset.optionId] = bucketId;
+          order.push(card.dataset.optionId);
         });
       });
+      context.answer.order = normalizeBucketOrder(context.questionDef, order);
       this.activateContext(context);
       this.syncBucketDom(context);
       this.markChanged(context.answer);
@@ -3576,6 +4053,7 @@
       if (!answer || !questionDef || questionDef.type !== "evaluation") return;
       answer.selected = answer.selected === optionId ? "" : optionId;
       this.refreshEvaluationState(context);
+      if (answer.selected) this.revealEvaluationOption(context, answer.selected);
       this.markChanged(answer);
     }
 
@@ -3589,9 +4067,10 @@
       if (!questionDef || !answer) return;
       const id = uniqueAddedId(questionDef, answer, title);
       answer.added.push({ id, title });
-      if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = Array.from(new Set(asArray(answer.selected).concat(id)));
+      answer.selected = questionDef.select === "many" ? Array.from(new Set(asArray(answer.selected).concat(id))) : id;
       this.saveChanged(answer);
       this.render();
+      this.focusChoiceCard(context, id);
     }
 
     removeAdded(idOrIndex, context) {
@@ -3603,13 +4082,24 @@
         : numberOr(idOrIndex, -1);
       if (index < 0) return;
       const removed = answer.added[index];
+      const cardIds = answerOptions(questionDef, answer).map((entry) => entry.id);
+      const removedAt = removed ? cardIds.indexOf(removed.id) : -1;
+      const nextFocusId = cardIds[removedAt + 1] || cardIds[removedAt - 1];
       answer.added.splice(index, 1);
       if (removed) {
-        if (questionDef.type === "choice" && questionDef.select === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
+        if (questionDef.select === "many") answer.selected = asArray(answer.selected).filter((id) => id !== removed.id);
+        else if (answer.selected === removed.id) answer.selected = "";
         if (answer.comments) delete answer.comments[removed.id];
       }
       this.saveChanged(answer);
       this.render();
+      this.focusChoiceCard(context, nextFocusId);
+    }
+
+    focusChoiceCard(context, optionId) {
+      const section = this.sectionForContext(context);
+      const card = section && optionId && section.querySelector(`.ih-choice[data-option-id="${cssEscape(optionId)}"]`);
+      if (card) card.focus();
     }
 
     updateAddedTitle(optionId, title, context) {
@@ -3622,15 +4112,45 @@
     setBucket(optionId, bucketId, context) {
       const answer = context && context.answer;
       if (!answer || !answer.buckets) return;
+      if ((answer.buckets[optionId] || "") !== (bucketId || "")) {
+        answer.order = normalizeBucketOrder(context.questionDef, answer.order).filter((id) => id !== optionId).concat(optionId);
+      }
       answer.buckets[optionId] = bucketId || "";
       this.syncBucketDom(context);
       this.markChanged(answer);
     }
 
+    reorderBucketOption(button, context) {
+      const questionDef = context && context.questionDef;
+      const answer = context && context.answer;
+      if (!questionDef || questionDef.type !== "bucket" || !answer) return;
+      const optionId = button.dataset.optionId;
+      const siblings = (bucketGroups(questionDef, answer).get(answer.buckets[optionId] || "") || []).map((entry) => entry.id);
+      const index = siblings.indexOf(optionId);
+      const neighbor = siblings[button.dataset.direction === "up" ? index - 1 : index + 1];
+      if (index < 0 || !neighbor) return;
+      const order = normalizeBucketOrder(questionDef, answer.order);
+      const from = order.indexOf(optionId);
+      const to = order.indexOf(neighbor);
+      order[from] = neighbor;
+      order[to] = optionId;
+      answer.order = order;
+      this.syncBucketDom(context);
+      this.markChanged(answer);
+      // Reordering can move this card in the DOM, which drops focus.
+      button.focus();
+    }
+
     moveBucketOption(button, context) {
       const menu = button.closest(".ih-move-menu");
+      const hadFocus = button.contains(document.activeElement);
+      const fromKeyboard = button.matches(":focus-visible");
       if (menu) menu.open = false;
       this.setBucket(button.dataset.optionId, button.dataset.bucketId || "", context);
+      // The card may now sit in another list, which drops focus. Return it to the control just used,
+      // following the card only for keyboard users so a mouse user keeps their place.
+      const control = menu ? menu.querySelector(".ih-move-button") : button;
+      if (hadFocus && control) control.focus({ preventScroll: !fromKeyboard });
     }
 
     toggleMoveMenu(button) {
@@ -3742,8 +4262,6 @@
       if (!section) return;
       section.querySelectorAll(".ih-bucket-card[data-option-id], .ih-bucket-table-card[data-option-id]").forEach((card) => {
         const bucketId = answer.buckets && answer.buckets[card.dataset.optionId] || "";
-        const bucket = section.querySelector(`.ih-bucket[data-bucket-id="${cssEscape(bucketId)}"] .ih-bucket-list`);
-        if (card.classList.contains("ih-bucket-card") && bucket && card.parentElement !== bucket) bucket.appendChild(card);
         card.querySelectorAll("[data-action='move-bucket-option']").forEach((button) => {
           const selected = (button.dataset.bucketId || "") === bucketId;
           button.classList.toggle("is-current", selected);
@@ -3755,14 +4273,23 @@
           else button.removeAttribute("aria-current");
         });
       });
-      section.querySelectorAll(".ih-bucket").forEach((bucket) => {
-        const list = bucket.querySelector(".ih-bucket-list");
-        if (!list) return;
+      const groups = bucketGroups(questionDef, answer);
+      section.querySelectorAll(".ih-bucket-list[data-bucket-id], .ih-bucket-table-list[data-bucket-id]").forEach((list) => {
+        const bucketId = list.dataset.bucketId || "";
+        const view = list.classList.contains("ih-bucket-list") ? "board" : "table";
+        const cardClass = view === "board" ? "ih-bucket-card" : "ih-bucket-table-card";
+        const cards = (groups.get(bucketId) || [])
+          .map((entry) => section.querySelector(`.${cardClass}[data-option-id="${cssEscape(entry.id)}"]`))
+          .filter(Boolean);
         list.querySelectorAll(".ih-bucket-empty").forEach((empty) => empty.remove());
-        if (!list.querySelector(".ih-bucket-card")) {
+        cards.forEach((card, index) => {
+          if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
+          syncBucketCardPosition(card, bucketPosition(bucketId, index), cards.length);
+        });
+        if (!cards.length) {
           const empty = document.createElement("div");
           empty.className = "ih-bucket-empty";
-          empty.textContent = bucket.dataset.bucketId ? "Drop options here" : "Everything is bucketed";
+          empty.textContent = bucketEmptyText(bucketId, view);
           list.appendChild(empty);
         }
       });
@@ -3975,7 +4502,36 @@
   }
 
   function mount(input) {
-    return new InterviewHarnessApp(normalizeConfig(input));
+    try {
+      return new InterviewHarnessApp(normalizeConfig(input));
+    } catch (error) {
+      console.error(error);
+      showMountError(error);
+      throw error;
+    }
+  }
+
+  function showMountError(error) {
+    try {
+      const problems = errorProblems(error);
+      const report = [
+        `Interview Harness ${VERSION} could not open the interview:`,
+        ...problems.map((problem) => `- ${problem}`),
+        "Fix the interview file and send it again."
+      ].join("\n");
+      const theme = readSharedTheme();
+      applyThemeToDocument(theme);
+      injectStyles();
+      const root = resolveTarget(`#${DEFAULT_TARGET_ID}`);
+      root.innerHTML = renderMountError(theme, problems, report);
+      const panel = { root, toastTimer: null, toast: InterviewHarnessApp.prototype.toast };
+      root.querySelector("[data-action='copy-error-report']").addEventListener("click", () => {
+        copyToClipboard(report).then(() => panel.toast("Copied report."), () => {
+          global.getSelection().selectAllChildren(root.querySelector("[data-error-report]"));
+          panel.toast("Copy blocked. Report text selected.");
+        });
+      });
+    } catch (_) {}
   }
 
   function injectStyles() {
@@ -4010,8 +4566,9 @@
     textarea.style.left = "-9999px";
     document.body.appendChild(textarea);
     textarea.select();
-    document.execCommand("copy");
+    const copied = document.execCommand("copy");
     textarea.remove();
+    if (!copied) throw new Error("Copy blocked.");
   }
 
   function nextLabel(instance) {
@@ -4039,14 +4596,14 @@
   }
 
   const questionAnsweredChecks = {
-    choice: (questionDef, answer) => questionDef.select === "many" ? asArray(answer.selected).length > 0 : Boolean(answer.selected),
+    choice: (questionDef, answer) => chosenOptions(questionDef, answer).length > 0,
     evaluation: (_questionDef, answer) => Boolean(answer.selected),
     bucket: (questionDef, answer) => questionDef.options.every((entry) => Boolean(
       answer.buckets && answer.buckets[entry.id] || String(optionComment(answer, entry.id)).trim()
     )),
     flow: (_questionDef, answer) => Boolean(answer.confirmed),
     sequence: (_questionDef, answer) => Boolean(answer.confirmed),
-    edit: (_questionDef, answer) => Boolean(answer.touched) && Boolean(String(answer.content || "").trim())
+    edit: (_questionDef, answer) => Boolean(answer.confirmed) || (Boolean(answer.touched) && Boolean(String(answer.content || "").trim()))
   };
 
   function isQuestionAnswered(questionDef, answer) {
@@ -4072,6 +4629,35 @@
     return options.concat(normalizeAddedOptions(answer.added).map((entry) => Object.assign({ markdown: "", markdownTooltip: "", htmlPreview: "", previewType: "none", tags: [], custom: true }, entry)));
   }
 
+  function normalizeBucketOrder(questionDef, order) {
+    const ids = questionDef.options.map((entry) => entry.id);
+    const kept = Array.from(new Set(asArray(order))).filter((id) => ids.includes(id));
+    return kept.concat(ids.filter((id) => !kept.includes(id)));
+  }
+
+  function bucketsWithUnsorted(questionDef) {
+    return [{ id: "", title: "Unsorted" }].concat(questionDef.buckets || []);
+  }
+
+  // Unsorted cards keep their place in `order` but are not ranked.
+  function bucketPosition(bucketId, index) {
+    return bucketId ? index + 1 : 0;
+  }
+
+  function bucketGroups(questionDef, answer) {
+    const groups = new Map(bucketsWithUnsorted(questionDef).map((bucket) => [bucket.id, []]));
+    normalizeBucketOrder(questionDef, answer.order).forEach((id) => {
+      const bucketId = answer.buckets && answer.buckets[id] || "";
+      (groups.get(bucketId) || groups.get("")).push(questionDef.options.find((entry) => entry.id === id));
+    });
+    return groups;
+  }
+
+  function bucketEmptyText(bucketId, view) {
+    if (!bucketId) return "Everything is bucketed";
+    return view === "table" ? "No options yet" : "Drop options here";
+  }
+
   function optionComment(answer, optionId) {
     return answer && answer.comments && answer.comments[optionId] || "";
   }
@@ -4088,16 +4674,21 @@
     })).filter((entry) => entry.comment);
   }
 
-  function findOption(questionDef, answer, id) {
-    const entry = answerOptions(questionDef, answer).find((candidate) => candidate.id === id);
-    return entry ? { id: entry.id, title: entry.title } : null;
+  // A custom option the user has emptied stays on the page as a draft but never counts as an answer.
+  function writtenOptions(questionDef, answer) {
+    return answerOptions(questionDef, answer).filter((entry) => oneLine(entry.title));
+  }
+
+  function chosenOptions(questionDef, answer) {
+    const options = writtenOptions(questionDef, answer);
+    return asArray(answer.selected).map((id) => options.find((entry) => entry.id === id)).filter(Boolean);
   }
 
   function normalizeAddedOptions(input) {
     return asArray(input).map((entry, index) => {
       if (typeof entry === "string") return { id: slugify(entry) || `added-${index + 1}`, title: entry };
       const raw = Object.assign({}, entry || {});
-      const title = String(raw.title || raw.label || raw.name || raw.value || `Added option ${index + 1}`);
+      const title = typeof raw.title === "string" ? raw.title : String(raw.label || raw.name || raw.value || `Added option ${index + 1}`);
       return { id: String(raw.id || slugify(title) || `added-${index + 1}`), title };
     });
   }
@@ -4235,31 +4826,42 @@
     return positions;
   }
 
-  function defaultFlowPositions(nodes, connections) {
+  function flowLevels(nodes, connections) {
     const names = asArray(nodes).map((node) => node.name);
     const known = new Set(names);
     const incoming = Object.fromEntries(names.map((name) => [name, 0]));
     const outgoing = Object.fromEntries(names.map((name) => [name, []]));
     asArray(connections).forEach((connection) => {
-      if (!known.has(connection.from) || !known.has(connection.to)) return;
+      if (!known.has(connection.from) || !known.has(connection.to) || connection.from === connection.to) return;
       incoming[connection.to] += 1;
       outgoing[connection.from].push(connection.to);
     });
-    const levels = Object.fromEntries(names.map((name) => [name, 0]));
-    const queue = names.filter((name) => incoming[name] === 0);
+    // Depth-first order from the entry nodes; edges that point back up this order close a cycle and do not push levels down.
+    const order = [];
     const visited = new Set();
-    while (queue.length) {
-      const name = queue.shift();
-      if (visited.has(name)) continue;
+    const visit = (name) => {
       visited.add(name);
       outgoing[name].forEach((target) => {
-        levels[target] = Math.max(levels[target], levels[name] + 1);
-        incoming[target] -= 1;
-        if (incoming[target] === 0) queue.push(target);
+        if (!visited.has(target)) visit(target);
       });
-    }
-    const lastLevel = Math.max(0, ...Object.values(levels));
-    names.filter((name) => !visited.has(name)).forEach((name) => { levels[name] = lastLevel + 1; });
+      order.unshift(name);
+    };
+    names.filter((name) => incoming[name] === 0).concat(names).forEach((name) => {
+      if (!visited.has(name)) visit(name);
+    });
+    const rank = Object.fromEntries(order.map((name, index) => [name, index]));
+    const levels = Object.fromEntries(names.map((name) => [name, 0]));
+    order.forEach((name) => {
+      outgoing[name].forEach((target) => {
+        if (rank[target] > rank[name]) levels[target] = Math.max(levels[target], levels[name] + 1);
+      });
+    });
+    return levels;
+  }
+
+  function defaultFlowPositions(nodes, connections) {
+    const names = asArray(nodes).map((node) => node.name);
+    const levels = flowLevels(nodes, connections);
     const groups = {};
     names.forEach((name) => {
       const level = levels[name];
@@ -4276,6 +4878,99 @@
       });
     });
     return positions;
+  }
+
+  // Width in narrow characters: East Asian wide characters and emoji take two.
+  function flowTextWidth(text) {
+    return Array.from(text).reduce((width, char) => width
+      + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u.test(char) ? 2 : 1), 0);
+  }
+
+  // The canvas height that shows the flow at full scale: network.fit() leaves a 10% margin around the node bounds.
+  function flowFitHeight(answer) {
+    const nodes = normalizeFlowNodes(answer.nodes, answer.connections);
+    const connections = normalizeFlowConnections(answer.connections, false);
+    const positions = Object.values(normalizeFlowPositions(answer.positions, nodes));
+    const levelSeparation = flowLayoutSpacing(connections).levelSeparation;
+    const rows = positions.length
+      ? positions.map((position) => position.y)
+      : Object.values(flowLevels(nodes, connections)).map((level) => level * levelSeparation);
+    return rows.length ? Math.round(1.1 * (Math.max(...rows) - Math.min(...rows) + FLOW_NODE_HEIGHT)) : 0;
+  }
+
+  // Wraps a connection label for display in the fewest lines of FLOW_LABEL_LINE_CHARS, choosing the breaks that keep
+  // lines even, favour punctuation and a following conjunction or preposition, and keep a number with the word after it.
+  function flowDisplayLabel(value) {
+    const pieces = [];
+    String(value || "").split(/\s+/).filter(Boolean).forEach((word) => {
+      // Text without spaces (CJK, long URLs) may break between any two characters.
+      const parts = flowTextWidth(word) > FLOW_LABEL_LINE_CHARS ? Array.from(word) : [word];
+      parts.forEach((text, index) => pieces.push({ text, spaced: index === 0 && pieces.length > 0 }));
+    });
+    // offsets[i]: the width of pieces [0, i) set on one line.
+    const offsets = [0];
+    pieces.forEach((piece, index) => offsets.push(offsets[index] + flowTextWidth(piece.text) + (piece.spaced ? 1 : 0)));
+    const lineWidth = (start, end) => offsets[end] - offsets[start] - (pieces[start].spaced ? 1 : 0);
+    const lineText = (start, end) => pieces.slice(start, end).map((piece, index) => (index && piece.spaced ? " " : "") + piece.text).join("");
+    const fits = (start, end) => end - start === 1 || lineWidth(start, end) <= FLOW_LABEL_LINE_CHARS;
+    let lineCount = 0;
+    for (let start = 0; start < pieces.length; lineCount += 1) {
+      let end = start + 1;
+      while (end < pieces.length && fits(start, end + 1)) end += 1;
+      start = end;
+    }
+    if (lineCount <= 1) return lineText(0, pieces.length);
+    const target = lineWidth(0, pieces.length) / lineCount;
+    const startsPhrase = (text) => FLOW_LABEL_PHRASE_STARTS.has(text.toLowerCase().replace(/[^a-z]/g, ""));
+    // The cost of a line break before pieces[index]; negative where a reader expects one. Punctuation and small kana
+    // never start a line, and a number stays with the word after it ("48 h", "3 retries").
+    const breakCost = (index) => {
+      const before = pieces[index - 1].text;
+      const after = pieces[index].text;
+      const spaced = pieces[index].spaced;
+      if (/^[,;:.!?)、。，；：！？）ーぁぃぅぇぉっゃゅょァィゥェォッャュョ]/.test(after) || spaced && /\d$/.test(before) && !startsPhrase(after)) return 300;
+      return (/[,;:.!?)、。，；：！？）]$/.test(before) ? -80 : 0)
+        + (spaced ? 0 : 20)
+        + (startsPhrase(after) ? -40 : 0)
+        + (startsPhrase(before) || /^(a|an|the)$/i.test(before) ? 40 : 0);
+    };
+    // best[lines][end]: the cheapest way to set pieces [0, end) in that many lines.
+    const best = [[{ cost: 0, breaks: [] }]];
+    for (let lines = 1; lines <= lineCount; lines += 1) {
+      best[lines] = [];
+      best[lines - 1].forEach((previous, start) => {
+        for (let end = start + 1; end <= pieces.length && fits(start, end); end += 1) {
+          const cost = previous.cost + (lineWidth(start, end) - target) ** 2 + (end < pieces.length ? breakCost(end) : 0);
+          if (!best[lines][end] || cost < best[lines][end].cost) best[lines][end] = { cost, breaks: previous.breaks.concat(end) };
+        }
+      });
+    }
+    const breaks = [0].concat(best[lineCount][pieces.length].breaks);
+    return breaks.slice(1).map((end, index) => lineText(breaks[index], end)).join("\n");
+  }
+
+  function flowLayoutSpacing(connections) {
+    const labels = asArray(connections).filter((connection) => connection.label)
+      .map((connection) => ({ connection, lines: flowDisplayLabel(connection.label).split("\n") }));
+    const labelWidth = (label) => 6.2 * Math.max(...label.lines.map(flowTextWidth));
+    let fanWidth = 0;
+    ["from", "to"].forEach((end) => {
+      const groups = {};
+      labels.forEach((label) => {
+        const name = label.connection[end];
+        groups[name] = (groups[name] || []).concat(labelWidth(label));
+      });
+      Object.values(groups).filter((widths) => widths.length > 1).forEach((widths) => {
+        fanWidth = Math.max(fanWidth, ...widths);
+      });
+    });
+    const lineCount = Math.max(0, ...labels.map((label) => label.lines.length));
+    const nodeSpacing = Math.round(Math.min(360, Math.max(210, 2 * fanWidth + 28)));
+    return {
+      levelSeparation: 120 + 14 * Math.max(0, lineCount - 2),
+      nodeSpacing,
+      treeSpacing: nodeSpacing + 30
+    };
   }
 
   function flowExportText(value) {
@@ -4301,7 +4996,7 @@
     };
   }
 
-  function flowVisNodeRecord(node, position, theme) {
+  function flowVisNodeRecord(node, position, theme, level) {
     const colors = theme || flowVisualTheme(null);
     const comment = String(node.comment || "");
     const highlighted = Boolean(comment.trim());
@@ -4323,6 +5018,7 @@
       record.x = position.x;
       record.y = position.y;
     }
+    if (Number.isFinite(level)) record.level = level;
     return record;
   }
 
@@ -4334,14 +5030,10 @@
     const colors = theme || flowVisualTheme(null);
     const comment = String(connection.comment || "");
     const highlighted = Boolean(comment.trim());
-    const smooth = flowReciprocalConnection(connections, connection)
-      ? { enabled: true, type: "curvedCW", roundness: 0.12 }
-      : { enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 };
     return {
       id: flowConnectionKey(connection.from, connection.to),
       from: connection.from,
       to: connection.to,
-      label: connection.label || "",
       comment,
       arrows: { to: { enabled: true, scaleFactor: 0.82 } },
       color: {
@@ -4352,8 +5044,242 @@
       },
       width: 1.7,
       dashes: false,
-      smooth
+      smooth: flowSmoothOptions(connection, connections)[0]
     };
+  }
+
+  // The first option is the default curve; with the edge's end positions, wider curves follow as alternatives.
+  function flowSmoothOptions(connection, connections, from, to) {
+    const length = from && to ? Math.hypot(to.x - from.x, to.y - from.y) : 0;
+    // The curvedCW/curvedCCW roundness that bends the edge about `bulge` pixels away from a straight line.
+    const roundness = (bulge) => {
+      for (let step = 1; step < 20; step += 1) {
+        if (0.25 * (1 + step / 20) * length * Math.sin(step / 40 * Math.PI) >= bulge) return step / 20;
+      }
+      return 1;
+    };
+    if (flowReciprocalConnection(connections, connection)) {
+      return (length ? [20, 45, 70].map(roundness) : [0.3]).map((value) => ({ enabled: true, type: "curvedCW", roundness: value }));
+    }
+    return [{ enabled: true, type: "cubicBezier", forceDirection: "vertical", roundness: 0.42 }].concat(
+      (length ? [50, 90, 130] : []).map(roundness).flatMap((value) => ["curvedCW", "curvedCCW"].map((type) => ({ enabled: true, type, roundness: value })))
+    );
+  }
+
+  // Same curves vis-network draws for the smooth options above, so labels and routing can follow an edge.
+  function flowEdgePoint(from, to, smooth, t) {
+    const u = 1 - t;
+    if (smooth.type === "cubicBezier") {
+      const bend = smooth.roundness * (to.y - from.y);
+      return {
+        x: (u * u * u + 3 * u * u * t) * from.x + (3 * u * t * t + t * t * t) * to.x,
+        y: u * u * u * from.y + 3 * u * u * t * (from.y + bend) + 3 * u * t * t * (to.y - bend) + t * t * t * to.y
+      };
+    }
+    const factor = 0.5 + 0.5 * smooth.roundness;
+    const radius = Math.hypot(to.x - from.x, to.y - from.y);
+    const angle = Math.atan2(from.y - to.y, to.x - from.x) + (smooth.type === "curvedCW" ? factor : 1 - factor) * Math.PI;
+    const via = { x: from.x + factor * radius * Math.sin(angle), y: from.y + factor * radius * Math.cos(angle) };
+    return {
+      x: u * u * from.x + 2 * u * t * via.x + t * t * to.x,
+      y: u * u * from.y + 2 * u * t * via.y + t * t * to.y
+    };
+  }
+
+  function flowNodeBoxes(network, margin) {
+    const boxes = {};
+    Object.keys(network.getPositions()).forEach((name) => {
+      const box = network.getBoundingBox(name);
+      boxes[name] = { left: box.left - margin, top: box.top - margin, right: box.right + margin, bottom: box.bottom + margin };
+    });
+    return boxes;
+  }
+
+  function flowBoxesOverlap(a, b) {
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  }
+
+  // The area network.fit() shows: the nodes' bounds plus vis-network's 10% margin, widened to the canvas shape.
+  function flowFitBox(network, host) {
+    const boxes = Object.values(flowNodeBoxes(network, 0));
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    if (!boxes.length || !width || !height) return null;
+    const left = Math.min(...boxes.map((box) => box.left));
+    const top = Math.min(...boxes.map((box) => box.top));
+    const right = Math.max(...boxes.map((box) => box.right));
+    const bottom = Math.max(...boxes.map((box) => box.bottom));
+    const scale = Math.min(1, width / (1.1 * Math.max(1, right - left)), height / (1.1 * Math.max(1, bottom - top)));
+    const x = (left + right) / 2;
+    const y = (top + bottom) / 2;
+    return { left: x - width / scale / 2, top: y - height / scale / 2, right: x + width / scale / 2, bottom: y + height / scale / 2 };
+  }
+
+  function flowOutside(box, point) {
+    return Boolean(box) && (point.x < box.left || point.x > box.right || point.y < box.top || point.y > box.bottom);
+  }
+
+  function flowCurvePoints(from, to, smooth) {
+    const points = [];
+    for (let step = 1; step < 20; step += 1) points.push(flowEdgePoint(from, to, smooth, step / 20));
+    return points;
+  }
+
+  function flowPolylineCrossings(a, b) {
+    const side = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+    let crossings = 0;
+    for (let i = 1; i < a.length; i += 1) {
+      for (let j = 1; j < b.length; j += 1) {
+        if (side(a[i - 1], a[i], b[j - 1]) !== side(a[i - 1], a[i], b[j]) && side(b[j - 1], b[j], a[i - 1]) !== side(b[j - 1], b[j], a[i])) crossings += 1;
+      }
+    }
+    return crossings;
+  }
+
+  // Keep each edge clear of the nodes it does not connect. When the default curve passes through one, use the wider
+  // curve on either side that passes through the fewest nodes, stays in view and crosses the fewest other edges.
+  function routeFlowEdges(network, edges, connections, view) {
+    const positions = network.getPositions();
+    const boxes = flowNodeBoxes(network, 8);
+    const valid = asArray(connections).filter((connection) => positions[connection.from] && positions[connection.to]
+      && edges.get(flowConnectionKey(connection.from, connection.to)));
+    const curves = {};
+    valid.forEach((connection) => {
+      const id = flowConnectionKey(connection.from, connection.to);
+      curves[id] = flowCurvePoints(positions[connection.from], positions[connection.to], edges.get(id).smooth);
+    });
+    const updates = valid.map((connection) => {
+      const id = flowConnectionKey(connection.from, connection.to);
+      const from = positions[connection.from];
+      const to = positions[connection.to];
+      const obstacles = Object.keys(boxes).filter((name) => name !== connection.from && name !== connection.to).map((name) => boxes[name]);
+      const blocked = (points) => points.filter((point) => flowOutside(view, point)
+        || obstacles.some((box) => point.x > box.left && point.x < box.right && point.y > box.top && point.y < box.bottom)).length;
+      const options = flowSmoothOptions(connection, connections, from, to);
+      let best = null;
+      options.some((smooth, index) => {
+        const points = flowCurvePoints(from, to, smooth);
+        let score = blocked(points);
+        if (index === 0 && score === 0) {
+          best = { smooth };
+          return true;
+        }
+        Object.keys(curves).forEach((other) => {
+          if (other !== id) score += flowPolylineCrossings(points, curves[other]);
+        });
+        if (!best || score < best.score) best = { smooth, score };
+        return false;
+      });
+      return { id, smooth: best.smooth };
+    });
+    edges.update(updates);
+  }
+
+  // Whether any segment of the polyline passes through the box (Liang-Barsky clipping).
+  function flowPolylineCrossesBox(points, box) {
+    return points.some((a, index) => {
+      const b = points[index + 1];
+      if (!b) return false;
+      let enter = 0;
+      let exit = 1;
+      return [[a.x - b.x, a.x - box.left], [b.x - a.x, box.right - a.x], [a.y - b.y, a.y - box.top], [b.y - a.y, box.bottom - a.y]]
+        .every(([direction, distance]) => {
+          if (direction === 0) return distance >= 0;
+          if (direction < 0) enter = Math.max(enter, distance / direction);
+          else exit = Math.min(exit, distance / direction);
+          return enter <= exit;
+        });
+    });
+  }
+
+  // Label centres to try for an edge, nearest its midpoint first: on the curve or beside it.
+  function flowEdgeLabelCentres(from, to, smooth, width, height) {
+    const centres = [];
+    FLOW_LABEL_POSITIONS.forEach((t) => {
+      const point = flowEdgePoint(from, to, smooth, t);
+      const ahead = flowEdgePoint(from, to, smooth, t + 0.02);
+      // Beside a steep stretch means left or right of it; beside a flat stretch means above or below it.
+      const steep = Math.abs(ahead.y - point.y) >= Math.abs(ahead.x - point.x);
+      const bend = steep ? point.x - (from.x + (to.x - from.x) * t) : point.y - (from.y + (to.y - from.y) * t);
+      const outside = bend >= 0 ? 1 : -1;
+      // A curved edge (reciprocal or routed around a node) keeps its label on the outside of its bend.
+      const sides = smooth.type === "cubicBezier" ? [0, outside, -outside] : [outside, 0, -outside];
+      sides.forEach((side) => centres.push({
+        x: point.x + (steep ? side * (width / 2 + 4) : 0),
+        y: point.y + (steep ? 0 : side * (height / 2 + 4))
+      }));
+    });
+    return centres;
+  }
+
+  // Label centres to try for a node's connection to itself, just outside the loop: up and right, up, right, up and left.
+  // vis-network draws the loop with radius 20 around the point where a 45-degree line from the node's centre leaves the
+  // box, which for a box wider than tall is half its height up and to the right.
+  function flowLoopLabelCentres(node, nodeBox, width, height) {
+    const half = (nodeBox.bottom - nodeBox.top) / 2;
+    return [[1, 1], [0, 1], [1, 0], [-1, 1]].map(([right, up]) => {
+      // The label's nearest corner or side sits 24px (radius and gap) from the loop's centre.
+      const reach = right && up ? 24 / Math.SQRT2 : 24;
+      return { x: node.x + half + right * (reach + width / 2), y: node.y - half - up * (reach + height / 2) };
+    });
+  }
+
+  // vis-network always centres an edge label on the curve midpoint; this draws labels instead and slides each one
+  // along its edge, centred on it or beside it, until it clears the nodes, the labels already placed and other edges.
+  function drawFlowLabels(ctx, network, edges, connections, theme, view) {
+    // Like vis-network's own labels, hide text that would be drawn smaller than 4px.
+    if (11 * network.getScale() < 4) return;
+    const positions = network.getPositions();
+    const nodeBoxes = Object.values(flowNodeBoxes(network, 4));
+    const placed = [];
+    const lineHeight = 13;
+    const present = asArray(connections)
+      .map((connection) => ({ connection, edge: edges.get(flowConnectionKey(connection.from, connection.to)) }))
+      .filter(({ connection, edge }) => edge && positions[connection.from] && positions[connection.to]);
+    const curves = present.filter(({ connection }) => connection.from !== connection.to).map(({ connection, edge }) => {
+      const points = flowCurvePoints(positions[connection.from], positions[connection.to], edge.smooth);
+      const xs = points.map((point) => point.x);
+      const ys = points.map((point) => point.y);
+      return { connection, points, bounds: { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) } };
+    });
+    // What a label box would hide or confuse: nodes worst, then placed labels, then other edges.
+    const cost = (box, connection) => {
+      const clearance = { left: box.left - 3, top: box.top - 3, right: box.right + 3, bottom: box.bottom + 3 };
+      return 3 * nodeBoxes.filter((other) => flowBoxesOverlap(box, other)).length
+        + 2 * placed.filter((other) => flowBoxesOverlap(box, other)).length
+        + curves.filter((curve) => curve.connection !== connection && flowBoxesOverlap(clearance, curve.bounds)
+          && flowPolylineCrossesBox(curve.points, clearance)).length;
+    };
+    const length = ({ connection }) => Math.hypot(positions[connection.to].x - positions[connection.from].x, positions[connection.to].y - positions[connection.from].y);
+    ctx.save();
+    ctx.font = "11px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // Short edges have the least room to move a label, so they choose first.
+    present.filter(({ connection }) => connection.label).sort((a, b) => length(a) - length(b)).forEach(({ connection, edge }) => {
+      const lines = flowDisplayLabel(connection.label).split("\n");
+      const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 8;
+      const height = lines.length * lineHeight + 4;
+      const centres = connection.from === connection.to
+        ? flowLoopLabelCentres(positions[connection.from], network.getBoundingBox(connection.from), width, height)
+        : flowEdgeLabelCentres(positions[connection.from], positions[connection.to], edge.smooth, width, height);
+      let best = null;
+      centres.some((centre) => {
+        // Slide a label that would leave the view back inside it, over its own edge if need be.
+        const x = view ? Math.min(Math.max(centre.x, view.left + width / 2 + 4), view.right - width / 2 - 4) : centre.x;
+        const y = view ? Math.min(Math.max(centre.y, view.top + height / 2 + 4), view.bottom - height / 2 - 4) : centre.y;
+        const box = { left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 };
+        const score = cost(box, connection);
+        if (!best || score < best.score) best = { x, box, score };
+        return score === 0;
+      });
+      placed.push(best.box);
+      ctx.fillStyle = theme.labelBackground;
+      ctx.fillRect(best.box.left, best.box.top, width, height);
+      ctx.fillStyle = theme.muted;
+      lines.forEach((line, index) => ctx.fillText(line, best.x, best.box.top + 2 + lineHeight * (index + 0.5)));
+    });
+    ctx.restore();
   }
 
   function artifactText(artifact) {
@@ -4403,9 +5329,33 @@
     return width;
   }
 
+  function normalizePreviewFrame(value, path) {
+    if (value === undefined || value === null) return "";
+    if (value !== "phone") throw new TypeError(`${path} must be phone.`);
+    return value;
+  }
+
   function assertKnownFields(value, allowed, path) {
     const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
     if (unknown.length) throw new TypeError(`${path} contains unknown ${unknown.length === 1 ? "field" : "fields"}: ${unknown.join(", ")}.`);
+  }
+
+  function collectProblem(problems, check) {
+    try {
+      return check();
+    } catch (error) {
+      problems.push(...errorProblems(error));
+      return undefined;
+    }
+  }
+
+  function throwProblems(problems) {
+    if (problems.length) throw Object.assign(new TypeError(problems.join("\n")), { problems });
+  }
+
+  function errorProblems(error) {
+    if (error && Array.isArray(error.problems) && error.problems.length) return error.problems;
+    return [String((error && error.message) || error) || "Unknown error."];
   }
 
   function configFingerprint(value) {
@@ -4475,6 +5425,10 @@
       .trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
+  }
+
+  function oneLine(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
   }
 
   function normalizeTheme(value) {

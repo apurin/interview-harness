@@ -25,9 +25,9 @@ A single interview can combine several forms of review:
 | `sequence` | Review and correct a proposed exchange between participants |
 | `edit` | Revise a proposed text or code artifact |
 
-Cards can include Markdown, labels, tooltips, and inline or file-based previews. Comments can be attached to options, comparison criteria, buckets, flow elements, sequences, and edits—including items you do not select.
+Cards can include Markdown, labels, tooltips, and inline or file-based previews, optionally shown in a phone frame. Comments can be attached to options, comparison criteria, buckets, flow elements, sequences, and edits—including items you do not select. You can add your own option to any choice, order items within a category when the author asks for order, and note anything the questions did not cover before exporting.
 
-The library handles layout, navigation, progress, selection, editing, local state, Light and Dark themes, and concise text export. The generated file contains the interview content and loads the exact runtime version used to create it.
+The library handles layout, navigation, progress, selection, editing, local state, Light and Dark themes, and concise text export. A malformed interview shows its errors on the page with a report you can paste back to the agent. The generated file contains the interview content and loads the exact runtime version used to create it.
 
 ## Give it to an agent
 
